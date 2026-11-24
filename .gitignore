@@ -1,0 +1,8 @@
+/admin.credentials.php
+/staff.credentials.php
+/shop-data.php
+/shop-lock.php
+/shop-write-*.php
+/.qodo/
+/.env
+/.env.*

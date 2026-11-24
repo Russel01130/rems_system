@@ -1,0 +1,44 @@
+﻿.customer-portal{background:#fcfaf6;color:var(--retail-ink);min-height:100vh}
+.portal-header{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:12px 4%;border-bottom:1px solid var(--retail-line);background:var(--retail-paper)}
+.portal-header nav{display:flex;gap:8px}
+.portal-header nav button{padding:8px 12px;border:0;border-radius:7px;background:transparent;min-height:42px}
+.portal-header nav button[aria-current]{background:#f9e6bd;font-weight:700}
+.portal-content{padding:24px clamp(12px,4vw,48px);max-width:1400px;margin:auto}
+.portal-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:22px}
+.portal-heading h1{margin:0;font-size:clamp(27px,4vw,40px)}
+.portal-heading p{margin:5px 0 0;color:var(--retail-muted)}
+.portal-shop-grid,.portal-booking-grid{display:grid;align-items:start;gap:20px}
+.portal-shop-grid{grid-template-columns:minmax(0,1fr) minmax(220px,310px)}
+.portal-booking-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+.portal-card{background:var(--retail-paper);border:1px solid var(--retail-line);border-radius:10px;padding:16px;min-width:0}
+.portal-card h2{margin:0 0 12px;font-size:18px}
+.portal-search{background:var(--retail-paper);border:1px solid var(--retail-line);border-radius:7px;padding:9px 12px;margin-bottom:12px}
+.portal-cart{position:sticky;top:10px}
+.portal-cart-line,.portal-total{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 0;border-top:1px solid var(--retail-line);font-size:14px}
+.portal-cart-line{flex-wrap:wrap}
+.portal-cart-line p{width:100%;margin:0}
+.portal-cart-line strong{overflow-wrap:anywhere}
+.portal-total{font-size:16px;margin:8px 0}
+.portal-cart .primary,.portal-booking-form>.primary{width:100%;min-height:42px}
+.customer-portal button:disabled{opacity:.48}
+.portal-calendar-header{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:12px}
+.portal-calendar-header h2{margin:0}
+.portal-calendar-days{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px}
+.calendar-weekday{text-align:center;font-size:12px;color:var(--retail-muted)}
+.calendar-day{min-height:40px;border:1px solid var(--retail-line);border-radius:6px;background:var(--retail-paper);font-size:14px}
+.calendar-day:disabled,.booking-slots button:disabled{background:#eee9e3}
+.calendar-day[aria-pressed=true],.booking-slots button[aria-pressed=true]{background:#f3d598;border-color:#c68b3d;font-weight:700}
+.portal-booking-form{display:grid;gap:10px}
+.portal-booking-form label{display:grid;gap:3px;font-size:14px;font-weight:600}
+.portal-booking-form input,.portal-booking-form select{width:100%;border:1px solid var(--retail-line);background:white;color:var(--retail-ink);border-radius:6px;padding:7px 9px;min-height:38px}
+#booking-selected-date{margin:3px 0;font-size:14px}
+.booking-slots{display:flex;flex-wrap:wrap;gap:6px}
+.booking-slots button{min-height:36px}
+.portal-help,.portal-history-row p{font-size:14px;color:var(--retail-muted)}
+.portal-history-row{padding:9px 0;border-top:1px solid var(--retail-line);overflow-wrap:anywhere}
+.portal-history-row p{margin:4px 0}
+.portal-status{margin:0 0 12px;padding:9px 12px;border-radius:6px;background:#edf3e6;color:#315d2b}
+.portal-status:empty{display:none}
+.portal-status.portal-error{background:#f8e5e0;color:#8f3021}
+@media(max-width:800px){.portal-shop-grid,.portal-booking-grid{grid-template-columns:1fr}.portal-cart{position:static}}
+@media(max-width:520px){.portal-header{flex-wrap:wrap;gap:7px}.portal-header nav{order:3;width:100%}.portal-header nav button{flex:1}.portal-heading{align-items:flex-start;flex-direction:column}.portal-content{padding-top:16px}}
