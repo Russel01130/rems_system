@@ -122,9 +122,52 @@ function renderDashboardSales(today) {
     });
 }
 
+function nearExpiryProducts(inventory, today) {
+    const dayMs = 86400000;
+    const start = Date.parse(today + 'T00:00:00Z');
+    return inventory.map(product => {
+        const expiry = product[8]?.expiryDate;
+        return { product, expiry, days: (Date.parse(expiry + 'T00:00:00Z') - start) / dayMs };
+    }).filter(({ days }) => days >= 0 && days <= 30).sort((a, b) => a.days - b.days);
+}
+
+function renderNearExpiryRows(rows, entries) {
+    rows.replaceChildren();
+    if (!entries.length) {
+        appendCell(rows.insertRow(), 'No products are expiring in the next 30 days.').colSpan = 5;
+        return;
+    }
+    for (const { product, expiry, days } of entries) {
+        const row = rows.insertRow();
+        const thumbnail = retailNode('span', 'product-image');
+        showRecordPhoto(thumbnail, product[5], product[4]);
+        const name = retailNode('div', 'product-name');
+        name.append(thumbnail, productLabel(product));
+        appendCell(row, '').append(name);
+        appendCell(row, product[1]);
+        appendCell(row, formatDay(expiry));
+        appendCell(row, days === 0 ? 'Today' : days + (days === 1 ? ' day' : ' days'));
+        const [level, status] = days <= 7 ? ['critical', 'Critical'] : days <= 14 ? ['soon', 'Expiring Soon'] : ['monitor', 'Monitor'];
+        appendCell(row, '').append(retailNode('span', 'expiry-status ' + level, status));
+    }
+}
+
+const expirySummaryRows = document.querySelector('#near-expiry-rows');
+document.querySelector('#view-near-expiry')?.addEventListener('click', () => {
+    renderNearExpiryRows(document.querySelector('#all-near-expiry-rows'), nearExpiryProducts(products, localDate()));
+    document.querySelector('#near-expiry-dialog').showModal();
+});
+
 function refreshDashboard() {
     const dashboard = document.querySelector('#dashboard');
-    const low = products.filter(product => product[3] > 0 && product[3] <= 5).sort((a, b) => a[3] - b[3]);
+    const low = products.filter(isLowStock).sort((a, b) => a[3] - b[3]);
+    const warning = document.querySelector('#inventory-stock-warning');
+    if (warning) {
+        warning.hidden = low.length === 0;
+        warning.textContent = low.length === 0 ? '' : 'Low-stock warning: ' + low.slice(0, 3).map(product =>
+            product[0] + ' (' + product[3] + ' left, minimum ' + (product[8]?.minimumStock ?? 5) + ')').join(', ')
+            + (low.length > 3 ? ' and ' + (low.length - 3) + ' more' : '') + '.';
+    }
     const today = localDate();
     renderDashboardSales(today);
     const totals = [products.length, low.length, records.Customers.length];
@@ -134,16 +177,7 @@ function refreshDashboard() {
     document.querySelectorAll('#inventory .stat strong').forEach((item, index) => {
         item.textContent = [products.length, low.length, products.filter(product => product[3] === 0).length][index];
     });
-    const recent = dashboard.querySelector('.recent tbody');
-    recent?.replaceChildren();
-    if (recent) records.Reports.slice(0, 3).forEach(([id, customer, date, , amount]) => {
-        const row = recent.insertRow();
-        [id, customer, date === today ? 'Today' : dateFormat.format(new Date(date + 'T12:00')), pesos(amount)].forEach(value => appendCell(row, value));
-        const badge = document.createElement('span');
-        badge.className = 'complete';
-        badge.textContent = '✓ Completed';
-        appendCell(row, '').append(badge);
-    });
+    if (expirySummaryRows) renderNearExpiryRows(expirySummaryRows, nearExpiryProducts(products, today).slice(0, 3));
     const lowPanel = dashboard.querySelector('.low');
     lowPanel.querySelectorAll('.low-row').forEach(row => row.remove());
     low.slice(0, 3).forEach(([name, , , stock, icon, photo]) => {
@@ -310,7 +344,12 @@ function renderOperationTable(entries, config) {
         const row = rows.insertRow();
         if (isReport) {
             const [id, customer, date, details, total] = entry;
-            [id, customer, formatDay(date), details, pesos(total)].forEach(value => appendCell(row, value));
+            const receiptCell = appendCell(row, id, 'operation-identity');
+            if (saleReceiptIds.has(id)) {
+                const download = retailButton('Download receipt', () => downloadSaleReceipt(id, download), 'link');
+                receiptCell.append(retailNode('br'), download);
+            }
+            [customer, formatDay(date), details, pesos(total)].forEach(value => appendCell(row, value));
             continue;
         }
         const identity = appendCell(row, '', 'operation-identity');

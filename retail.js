@@ -41,12 +41,17 @@ products = products.map((product, index) => {
     return entry;
 });
 const discountInput = retail('#sale-discount');
-const customerInput = retail('#sale-customer');
+const saleDiscountLabels = { '': 'Discount', senior: 'Senior Citizen Discount (20%)', pwd: 'PWD Discount (20%)' };
+const validDiscountType = type => typeof type === 'string' && Object.hasOwn(saleDiscountLabels, type);
+const discountForSubtotal = (type, subtotal) => type === '' ? 0 : Math.round(subtotal / 5);
 const saleMessage = retail('#sale-message');
 const posSearch = retail('#pos-search');
 const categorySelect = retail('#pos-category');
 const payment = retail('#payment-dialog');
 const paymentForm = retail('#payment-form');
+const completeSaleButton = paymentForm.querySelector('button[type="submit"]');
+const saleReceiptDialog = retail('#sale-receipt-dialog');
+let paymentSaving = false;
 const saleStorageKey = 'rems-pos-drafts:' + admin.dataset.username.toLowerCase();
 let localSales = {};
 try {
@@ -57,8 +62,7 @@ try {
 let savedSales = localSales.saved ?? (admin.dataset.role === 'admin' ? records.SavedSales : null) ?? [];
 const initialDraft = localSales.draft ?? (admin.dataset.role === 'admin' ? records.RetailDraft : null);
 let cart = new Map(initialDraft?.lines ?? []);
-discountInput.value = initialDraft?.discount ?? 0;
-customerInput.value = initialDraft?.customer ?? '';
+discountInput.value = validDiscountType(initialDraft?.discountType) ? initialDraft.discountType : '';
 
 function storeLocalSales(draft, saved = savedSales) {
     localStorage.setItem(saleStorageKey, JSON.stringify({ draft, saved }));
@@ -101,7 +105,7 @@ function renderCatalog() {
     const category = categorySelect.value;
     const query = posSearch.value.trim().toLowerCase();
     const matching = products.filter(product => (!category || product[1] === category) &&
-        (product[0].toLowerCase().includes(query) || product[7]?.includes(query)));
+        (productLabel(product).toLowerCase().includes(query) || productBarcodes(product).some(code => code.toLowerCase().includes(query))));
     const maxPage = Math.max(1, Math.ceil(matching.length / 6));
     catalogPage = Math.min(catalogPage, maxPage);
     const start = (catalogPage - 1) * 6;
@@ -109,14 +113,15 @@ function renderCatalog() {
     grid.dataset.layout = catalogLayout;
     grid.replaceChildren();
     for (const product of matching.slice(start, start + 6)) {
-        const [name, , price, stock, , , id] = product;
+        const [, , price, stock, , , id] = product;
+        const name = productLabel(product);
         const card = retailNode('article', 'catalog-item');
         const info = retailNode('div', 'catalog-info');
         const add = retailButton('+', () => changeQuantity(id, 1), 'add-to-cart');
         add.setAttribute('aria-label', 'Add ' + name + ' to cart');
         add.disabled = stock <= (cart.get(id) ?? 0);
         info.append(retailNode('h2', '', name), retailNode('strong', '', pesos(price)),
-            retailNode('span', stock <= 6 ? 'stock-warning' : 'stock-ready', 'Stock: ' + stock), add);
+            retailNode('span', stock === 0 || isLowStock(product) ? 'stock-warning' : 'stock-ready', 'Stock: ' + stock), add);
         card.append(productPicture(product), info);
         grid.append(card);
     }
@@ -154,7 +159,7 @@ posSearch.addEventListener('input', resetCatalog);
 categorySelect.addEventListener('change', resetCatalog);
 posSearch.addEventListener('keydown', event => {
     if (event.key !== 'Enter') return;
-    const product = products.find(item => item[7] && item[7] === posSearch.value.trim());
+    const product = products.find(item => productBarcodes(item).includes(posSearch.value.trim()));
     if (!product) return;
     posSearch.value = '';
     resetCatalog();
@@ -173,13 +178,13 @@ const cents = amount => Math.round(Number(amount) * 100);
 function currentSale() {
     const lines = [...cart].map(([id, quantity]) => ({ product: products.find(entry => entry[6] === id), quantity }));
     const subtotal = lines.reduce((total, line) => total + cents(line.product?.[2] ?? 0) * line.quantity, 0);
-    const requestedDiscount = cents(discountInput.value);
-    const discount = Math.max(0, Math.min(subtotal, Number.isFinite(requestedDiscount) ? requestedDiscount : 0));
-    return { lines, subtotal, discount, total: subtotal - discount };
+    const discountType = discountInput.value;
+    const discount = discountForSubtotal(discountType, subtotal);
+    return { lines, subtotal, discountType, discount, total: subtotal - discount };
 }
 
 function draftSale(lines = [...cart]) {
-    return { lines, discount: discountInput.value, customer: customerInput.value.trim() };
+    return { lines, discountType: discountInput.value };
 }
 
 function persistDraft(nextCart) {
@@ -211,8 +216,7 @@ function renderSaleTotals() {
     retail('#sale-subtotal').textContent = pesos(subtotal / 100);
     retail('#discount-total').textContent = pesos(discount / 100);
     retail('#sale-total').textContent = pesos(total / 100);
-    discountInput.max = (subtotal / 100).toFixed(2);
-    for (const selector of ['#checkout', '#clear-cart', '#hold-sale', '#park-sale']) retail(selector).disabled = !cart.size;
+    for (const selector of ['#checkout', '#clear-cart', '#hold-sale']) retail(selector).disabled = !cart.size;
 }
 
 function refreshSale() {
@@ -223,7 +227,8 @@ function refreshSale() {
     retail('#sale-title').textContent = '🛒 Current Sale (' + lines.reduce((sum, line) => sum + line.quantity, 0) + ')';
     if (!lines.length) items.append(retailNode('p', 'retail-empty', 'Add products to start a sale.'));
     for (const { product, quantity } of lines) {
-        const [name, , price, stock, , , id] = product;
+        const [, , price, stock, , , id] = product;
+        const name = productLabel(product);
         const row = retailNode('div', 'cart-line');
         const details = retailNode('div', 'cart-details');
         const controls = retailNode('div', 'cart-controls');
@@ -246,9 +251,9 @@ function refreshSale() {
 }
 
 discountInput.addEventListener('input', renderSaleTotals);
-for (const field of [discountInput, customerInput]) field.addEventListener('change', () => persistDraft(cart));
+discountInput.addEventListener('change', () => persistDraft(cart));
 retail('#clear-cart').addEventListener('click', () => {
-    if (updateSaleState({ lines: [], discount: 0, customer: '' })) saleMessage.textContent = 'Cart cleared.';
+    if (updateSaleState({ lines: [], discountType: '' })) saleMessage.textContent = 'Cart cleared.';
 });
 
 function updateSaleState(draft, saved = savedSales) {
@@ -259,8 +264,7 @@ function updateSaleState(draft, saved = savedSales) {
         return false;
     }
     cart = new Map(draft.lines);
-    discountInput.value = draft.discount;
-    customerInput.value = draft.customer;
+    discountInput.value = validDiscountType(draft.discountType) ? draft.discountType : '';
     refreshSale();
     return true;
 }
@@ -277,7 +281,7 @@ function renderSavedSales() {
             const row = retailNode('div', 'saved-sale-row');
             const label = retailNode('div');
             const units = sale.lines.reduce((total, [, quantity]) => total + quantity, 0);
-            label.append(retailNode('strong', '', sale.customer || 'Walk-in'),
+            label.append(retailNode('strong', '', 'Walk-in'),
                 retailNode('small', '', units + (units === 1 ? ' item' : ' items') + (sale.savedOn ? ' · ' + dateFormat.format(new Date(sale.savedOn + 'T12:00')) : '')));
             const resume = retailButton('Resume', () => resumeSale(sale));
             const discard = retailButton('Discard', () => {
@@ -297,16 +301,11 @@ function renderSavedSales() {
     }
 }
 
-function saleValidation({ lines, subtotal }, checkStock = true) {
+function saleValidation({ lines, discountType }, checkStock = true) {
     if (!lines.length || lines.some(({ product, quantity }) => !product || !Number.isSafeInteger(quantity) || quantity < 1 || (checkStock && product[3] < quantity))) {
         return 'Check that the cart contains valid products and quantities within available stock.';
     }
-    const discount = discountInput.value || '0';
-    if (!validMoney(discount) || cents(discount) > subtotal) return 'Enter a discount between zero and the subtotal, with up to two decimal places.';
-    const customer = customerInput.value.trim();
-    if (customer && customer.toLowerCase() !== 'walk-in' && !records.Customers.some(([name]) => name.toLowerCase() === customer.toLowerCase())) {
-        return 'Choose a registered customer, or leave the field blank for a walk-in.';
-    }
+    if (!validDiscountType(discountType)) return 'Choose a valid discount.';
     return '';
 }
 
@@ -318,14 +317,14 @@ function suspendSale(kind) {
         return;
     }
     const stored = [...savedSales, { ...draftSale(), kind, id: newRetailId(), savedOn: localDate() }];
-    if (updateSaleState({ lines: [], discount: 0, customer: '' }, stored)) {
+    if (updateSaleState({ lines: [], discountType: '' }, stored)) {
         saleMessage.textContent = kind + ' sale saved.';
     }
 }
 
 function resumeSale(sale) {
     if (cart.size) {
-        saleMessage.textContent = 'Clear, hold, or park the current cart before resuming another sale.';
+        saleMessage.textContent = 'Clear or hold the current cart before resuming another sale.';
         return;
     }
     if (updateSaleState(sale, savedSales.filter(entry => entry.id !== sale.id))) {
@@ -334,8 +333,37 @@ function resumeSale(sale) {
     }
 }
 retail('#hold-sale').addEventListener('click', () => suspendSale('Held'));
-retail('#park-sale').addEventListener('click', () => suspendSale('Parked'));
+function openSaleReceipt(id, details) {
+    retail('#sale-receipt-details').textContent = details;
+    retail('#sale-receipt-print-details').textContent = details;
+    retail('#print-sale-receipt').dataset.filename = id.replace(/^#/, '') + '-receipt.pdf';
+    if (payment.open) payment.close();
+    saleReceiptDialog.showModal();
+}
+retail('#print-sale-receipt').addEventListener('click', event => {
+    downloadReceiptPdf(retail('#sale-receipt-title').textContent,
+        retail('#sale-receipt-details').textContent, event.currentTarget.dataset.filename);
+});
+
+async function downloadSaleReceipt(id, button) {
+    button.disabled = true;
+    try {
+        const { receipt } = await shopRequest('sale_receipt_download', { id });
+        const bytes = Uint8Array.from(atob(receipt), char => char.charCodeAt(0));
+        const link = retailNode('a');
+        const url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
+        link.href = url;
+        link.download = id.slice(1) + '-receipt.pdf';
+        link.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (error) {
+        retail('#shop-load-error').textContent = error.message;
+    } finally {
+        button.disabled = false;
+    }
+}
 retail('#checkout').addEventListener('click', async () => {
+    if (paymentSaving) return;
     const sale = currentSale();
     const error = saleValidation(sale);
     if (error) {
@@ -348,10 +376,11 @@ retail('#checkout').addEventListener('click', async () => {
         button.disabled = true;
         try {
             await sendShopRequest('sale', {
-                lines: sale.lines.map(({ product, quantity }) => [product[6], quantity, product[0], product[2]]),
-                discount: sale.discount / 100, total: total / 100, customer: customerInput.value.trim() || 'Walk-in'
+                lines: sale.lines.map(({ product, quantity }) => [product[6], quantity, productLabel(product), product[2]]),
+                discountType: sale.discountType, discount: sale.discount / 100,
+                total: total / 100, customer: 'Walk-in'
             });
-            updateSaleState({ lines: [], discount: 0, customer: '' });
+            updateSaleState({ lines: [], discountType: '' });
             showSection('Requests');
         } catch (error) {
             saleMessage.textContent = error.message;
@@ -361,6 +390,8 @@ retail('#checkout').addEventListener('click', async () => {
         return;
     }
     paymentForm.reset();
+    completeSaleButton.disabled = false;
+    paymentForm.elements.cash.readOnly = false;
     paymentForm.elements.cash.min = (total / 100).toFixed(2);
     retail('#payment-total').textContent = 'Total due ' + pesos(total / 100);
     retail('#payment-change').textContent = '';
@@ -374,6 +405,7 @@ paymentForm.elements.cash.addEventListener('input', () => {
 paymentForm.addEventListener('submit', async event => {
     event.preventDefault();
     if (isStaff) return;
+    if (completeSaleButton.disabled) return;
     const sale = currentSale();
     const { lines, total } = sale;
     const cash = paymentForm.elements.cash.value;
@@ -384,52 +416,62 @@ paymentForm.addEventListener('submit', async event => {
         return;
     }
     const date = localDate();
-    const enteredCustomer = customerInput.value.trim().toLowerCase();
-    const customer = records.Customers.find(([name]) => name.toLowerCase() === enteredCustomer)?.[0] ?? 'Walk-in';
-    const transaction = ['#TRX-' + newRetailId().replaceAll('-', '').slice(0, 10).toUpperCase(), customer, date,
-        lines.map(({ product, quantity }) => quantity + ' × ' + product[0]).join(', '), total / 100];
+    const transaction = ['#TRX-' + newRetailId().replaceAll('-', '').slice(0, 10).toUpperCase(), 'Walk-in', date,
+        lines.map(({ product, quantity }) => quantity + ' × ' + productLabel(product)).join(', '), total / 100];
+    const receiptDetails = [
+        'Rem’s Pet Supplies & Accessories Shop',
+        transaction[0] + ' · ' + formatDay(date),
+        'Customer Walk-in',
+        '',
+        ...lines.map(({ product, quantity }) => quantity + ' × ' + productLabel(product) + ' @ ' + pesos(product[2])
+            + ' = ' + pesos(cents(product[2]) * quantity / 100)),
+        '',
+        'Subtotal ' + pesos(sale.subtotal / 100),
+        saleDiscountLabels[sale.discountType] + ' ' + pesos(sale.discount / 100),
+        'Total paid ' + pesos(total / 100),
+        'Cash received ' + pesos(received / 100),
+        'Change ' + pesos((received - total) / 100),
+    ].join('\n');
     const nextProducts = products.map(product => {
         if (!cart.has(product[6])) return product;
         const updated = [...product];
         updated[3] -= cart.get(product[6]);
         return updated;
     });
-    const nextCustomers = records.Customers.map(entry => {
-        if (entry[0] !== customer) return entry;
-        const updated = [...entry];
-        updated[5] = (Number(updated[5]) || 0) + total / 100;
-        updated[6] = date;
-        return updated;
-    });
+    retail('#payment-error').textContent = '';
+    paymentSaving = true;
+    completeSaleButton.disabled = true;
+    paymentForm.elements.cash.readOnly = true;
     try {
-        await storeShop(nextProducts, { ...records, Customers: nextCustomers, Reports: [transaction, ...records.Reports] });
+        await storeShop(nextProducts, { ...records, Reports: [transaction, ...records.Reports] });
     } catch (error) {
         retail('#payment-error').textContent = error.message;
+        completeSaleButton.disabled = false;
+        paymentForm.elements.cash.readOnly = false;
         return;
+    } finally {
+        paymentSaving = false;
     }
-    try { storeLocalSales({ lines: [], discount: 0, customer: '' }); } catch { /* The sale is already recorded. */ }
+    try { storeLocalSales({ lines: [], discountType: '' }); } catch { /* The sale is already recorded. */ }
     cart.clear();
-    discountInput.value = '0';
-    customerInput.value = '';
-    payment.close();
+    discountInput.value = '';
     refreshSale();
     refreshDashboard();
     saleMessage.textContent = 'Sale completed. Change ' + pesos((received - total) / 100) + '.';
+    openSaleReceipt(transaction[0], receiptDetails);
 });
 
 const customerDialog = retail('#customer-dialog');
 const customerForm = retail('#customer-form');
+const customerSave = retail('#save-customer');
+const customerDelete = retail('#delete-customer');
 const customerMessage = retail('#customer-message');
 const customerSearch = retail('#customer-search');
 const customerStatus = retail('#customer-status');
 const customerFields = [['fullName', 0], ['phone', 1], ['email', 2], ['status', 4]];
 let customerPage = 1;
 let customerEditIndex = -1;
-let returnToSale = false;
-
-function renderCustomerOptions() {
-    retail('#sale-customers').replaceChildren(...records.Customers.map(([name]) => new Option(name, name)));
-}
+let customerEditEntry;
 
 function renderCustomers() {
     const customers = records.Customers;
@@ -487,6 +529,42 @@ function renderCustomers() {
     });
 }
 
+async function deleteCustomer() {
+    const entry = customerEditEntry;
+    if (isStaff || customerDelete.hidden || customerDelete.disabled || !entry) return;
+    const [name] = entry;
+    const errorLine = retail('#customer-error');
+    errorLine.textContent = '';
+    if (!records.Customers.includes(entry)) {
+        errorLine.textContent = 'The customer list changed. Reopen this form and try again.';
+        return;
+    }
+    if (records.Pets.some(pet => pet[1] === name)) {
+        errorLine.textContent = 'Reassign or remove this customer’s pets before deleting the customer record.';
+        return;
+    }
+    if (!window.confirm('Delete the customer record for ' + name + '?')) return;
+
+    customerDelete.disabled = true;
+    customerSave.disabled = true;
+    try {
+        const customers = records.Customers.filter(customer => customer !== entry);
+        await storeShop(products, { ...records, Customers: customers });
+    } catch (error) {
+        errorLine.textContent = error.message;
+        return;
+    } finally {
+        customerDelete.disabled = false;
+        customerSave.disabled = false;
+    }
+    if (customerEditEntry === entry) customerDialog.close();
+    renderCustomers();
+    refreshDashboard();
+    customerMessage.textContent = 'Customer deleted.';
+}
+
+customerDelete.addEventListener('click', deleteCustomer);
+
 customerSearch.addEventListener('input', () => {
     customerPage = 1;
     renderCustomers();
@@ -498,11 +576,11 @@ function applyCustomerFilters() {
 retail('#customer-filter').addEventListener('click', applyCustomerFilters);
 customerStatus.addEventListener('change', applyCustomerFilters);
 
-function openCustomer(mode, index = -1, fromSale = false) {
+function openCustomer(mode, index = -1) {
     const entry = records.Customers[index];
     const readOnly = mode === 'view';
     customerEditIndex = index;
-    returnToSale = fromSale;
+    customerEditEntry = mode === 'edit' ? entry : undefined;
     customerForm.reset();
     retail('#customer-dialog-title').textContent = { view: 'Customer Details', add: 'Add Customer', edit: 'Edit Customer' }[mode];
     retail('#customer-error').textContent = '';
@@ -511,12 +589,12 @@ function openCustomer(mode, index = -1, fromSale = false) {
         field.disabled = readOnly;
         if (entry?.[position]) field.value = entry[position];
     });
-    customerForm.querySelector('button').hidden = readOnly;
-    customerForm.querySelector('button').textContent = isStaff ? 'Send for Approval' : 'Save Customer';
+    customerSave.hidden = readOnly;
+    customerSave.textContent = isStaff ? 'Send for Approval' : 'Save Customer';
+    customerDelete.hidden = isStaff || !customerEditEntry;
     customerDialog.showModal();
 }
 retail('#add-customer').addEventListener('click', () => openCustomer('add'));
-retail('#sale-add-customer').addEventListener('click', () => openCustomer('add', -1, true));
 function customerContactError(phone, email, except = -1) {
     if (phone && (!/^[+0-9 ().-]+$/.test(phone) || !/^\d{7,15}$/.test(phone.replace(/\D/g, '')))) return 'Enter a valid phone number with 7 to 15 digits.';
     if (email && !/^[^\s@]+@[^\s@.]+(?:\.[^\s@.]+)+$/.test(email)) return 'Enter a valid email address.';
@@ -562,19 +640,12 @@ customerForm.addEventListener('submit', async event => {
         return;
     }
     customerDialog.close();
-    renderCustomerOptions();
-    if (returnToSale) {
-        customerInput.value = name;
-        persistDraft(cart);
-    } else {
-        if (customerEditIndex < 0) {
-            customerSearch.value = '';
-
-            customerStatus.value = '';
-            applyCustomerFilters();
-        } else renderCustomers();
-        customerMessage.textContent = 'Customer saved.';
-    }
+    if (customerEditIndex < 0) {
+        customerSearch.value = '';
+        customerStatus.value = '';
+        applyCustomerFilters();
+    } else renderCustomers();
+    customerMessage.textContent = 'Customer saved.';
 });
 
 function parseCustomerCsv(source) {
@@ -649,7 +720,6 @@ importForm.addEventListener('submit', async event => {
 
         customerStatus.value = '';
         applyCustomerFilters();
-        renderCustomerOptions();
         customerMessage.textContent = 'Imported ' + imported.length + ' customer(s).' + (skipped ? ' Skipped ' + skipped + ' duplicate or invalid row(s).' : '');
     } catch (error) {
         retail('#import-error').textContent = error instanceof DOMException ? 'The import could not be saved.' : error.message;
@@ -662,7 +732,6 @@ document.addEventListener('rems:section', event => {
     if (event.detail === 'Point of Sale') {
         if (isStaff) retail('#checkout').textContent = 'Request Checkout';
         renderCategories();
-        renderCustomerOptions();
         refreshSale();
     } else if (event.detail === 'Customers') renderCustomers();
 });

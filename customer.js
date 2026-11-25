@@ -8,8 +8,10 @@ const priceCents = amount => Math.round(Number(amount) * 100);
 const formatMoney = amount => currency.format(amount);
 const portalDateObject = value => new Date(value + 'T00:00:00Z');
 const bookingForm = getPortal('#portal-booking-form');
+const receiptDialog = getPortal('#portal-receipt');
 const cart = new Map();
-let data = { products: [], days: [], orders: [], bookings: [], pets: [], ready: false };
+let data = { products: [], days: [], orders: [], bookings: [], pets: [], ready: false,
+    pausedModules: JSON.parse(portal.dataset.pausedModules) };
 let date = '';
 let time = '';
 let month = '';
@@ -51,7 +53,6 @@ async function request(action, fields = {}) {
 
 function showPortalPage(page) {
     activePage = page;
-    for (const section of ['shop', 'booking', 'history']) getPortal('#portal-' + section).hidden = section !== page;
     for (const button of portal.querySelectorAll('[data-portal-page]')) {
         if (button.dataset.portalPage === page) button.setAttribute('aria-current', 'page');
         else button.removeAttribute('aria-current');
@@ -123,7 +124,9 @@ function renderShop() {
     if (!cart.size) lines.append(element('p', 'portal-help', 'Your cart is empty.'));
     getPortal('#portal-cart-count').textContent = cart.size ? '(' + [...cart.values()].reduce((a, b) => a + b, 0) + ')' : '';
     getPortal('#portal-cart-total').textContent = formatMoney(total / 100);
-    getPortal('#portal-order').disabled = saving || !cart.size || invalid || !data.ready;
+    const pickupPaused = data.pausedModules.includes('pickup');
+    getPortal('#portal-pickup-maintenance').hidden = !pickupPaused;
+    getPortal('#portal-order').disabled = pickupPaused || saving || !cart.size || invalid || !data.ready;
 }
 
 function monthOffset(offset) {
@@ -182,6 +185,35 @@ function renderSlots() {
     getPortal('#portal-book').disabled = saving || !data.ready || !selected?.slots.some(slot => slot.time === time && slot.available);
 }
 
+function viewOrderReceipt(order) {
+    const items = order.items.map(item => {
+        const unitPrice = priceCents(item.price);
+        return item.quantity + ' × ' + item.name + ' @ ' + formatMoney(unitPrice / 100)
+            + ' = ' + formatMoney(item.quantity * unitPrice / 100);
+    });
+    const details = [
+        'Rem’s Pet Supplies & Accessories Shop',
+        'Order ' + order.id,
+        portalDate.format(new Date(order.created)) + ' · ' + order.status,
+        '',
+        ...items,
+        '',
+        'Order total ' + formatMoney(order.total),
+        ...(order.status === 'Awaiting pickup' ? ['Pay when you pick up your order.'] : []),
+    ].join('\n');
+    getPortal('#portal-receipt-details').textContent = details;
+    getPortal('#portal-print-details').textContent = details;
+    getPortal('#portal-receipt-download').dataset.orderId = order.id;
+    receiptDialog.showModal();
+}
+
+getPortal('#portal-receipt-download').addEventListener('click', event => {
+    downloadReceiptPdf(getPortal('#portal-receipt-title').textContent,
+        getPortal('#portal-receipt-details').textContent, event.currentTarget.dataset.orderId + '-receipt.pdf');
+});
+
+getPortal('#portal-receipt-print').addEventListener('click', () => window.print());
+
 function renderHistory() {
     const orders = getPortal('#portal-orders');
     const appointments = getPortal('#portal-appointments');
@@ -191,6 +223,9 @@ function renderHistory() {
         const card = element('div', 'portal-history-row');
         card.append(element('strong', '', order.id + ' · ' + order.status), element('p', '', portalDate.format(new Date(order.created)) + ' · ' + formatMoney(order.total)),
             element('p', '', order.items.map(item => item.quantity + ' × ' + item.name).join(', ')));
+        const receiptButton = portalButton('View Receipt', () => viewOrderReceipt(order), 'filter portal-receipt-button');
+        receiptButton.setAttribute('aria-label', 'View receipt for ' + order.id);
+        card.append(receiptButton);
         orders.append(card);
     }
     for (const booking of [...data.bookings].reverse()) {
@@ -216,8 +251,13 @@ function acceptPortal(portalData) {
 }
 
 function renderPortal() {
+    const bookingPaused = data.pausedModules.includes('booking');
+    getPortal('#portal-shop').hidden = activePage !== 'shop';
+    getPortal('#portal-history').hidden = activePage !== 'history';
+    getPortal('#portal-booking').hidden = activePage !== 'booking' || bookingPaused;
+    getPortal('#portal-booking-maintenance').hidden = activePage !== 'booking' || !bookingPaused;
     if (activePage === 'shop') renderShop();
-    if (activePage === 'booking') {
+    if (activePage === 'booking' && !bookingPaused) {
         getPortal('#portal-pets').replaceChildren(...data.pets.map(pet => new Option(pet.name, pet.name)));
         renderCalendar();
         renderSlots();

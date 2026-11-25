@@ -19,8 +19,8 @@
 .pos-layout{display:grid;grid-template-columns:minmax(0,1.8fr) minmax(290px,1fr);gap:22px;align-items:start}
 .catalog{min-width:0}
 .retail-toolbar,.customer-heading,.retail-footer{display:flex;align-items:center;gap:12px}
-.retail-toolbar>*,.category-tabs button,.view-buttons,.retail-pages button,.sale-actions button,#saved-sales button,.customer-heading button,.customer-pick button,.customer-pick input{border:1px solid var(--retail-line);border-radius:7px;background:var(--retail-paper)}
-.retail-toolbar>*,.customer-heading button,.customer-pick button,.customer-pick input{min-height:46px;padding:8px 12px}
+.retail-toolbar>*,.category-tabs button,.view-buttons,.retail-pages button,.sale-actions button,#saved-sales button,.customer-heading button{border:1px solid var(--retail-line);border-radius:7px;background:var(--retail-paper)}
+.retail-toolbar>*,.customer-heading button{min-height:46px;padding:8px 12px}
 .retail-search{display:flex;align-items:center;gap:9px;flex:1;min-width:100px;font-size:20px}
 .retail-search input{background:none;border:0;width:100%;min-width:0;font-size:14px}
 .retail-toolbar select,.retail-toolbar button{font-size:14px}
@@ -53,7 +53,7 @@
 .retail-pages span{padding-inline:4px}
 .sale-card{overflow:hidden;font-size:14px}
 .sale-card>header,.sale-totals>div,.cart-controls{display:flex;align-items:center;justify-content:space-between;gap:8px}
-.sale-card>header,.sale-totals,.customer-pick{padding:16px}
+.sale-card>header,.sale-totals{padding:16px}
 .sale-card>header,.cart-line,.sale-totals{border-bottom:1px solid var(--retail-line)}
 .sale-card>header .link{font-size:13px}
 #cart-lines{max-height:437px;overflow:auto}
@@ -70,16 +70,14 @@
 .cart-remove{font-size:18px}
 .sale-totals>div{margin-bottom:8px}
 .sale-totals label{display:flex;align-items:center;gap:8px}
-#sale-discount{width:83px;border:1px solid var(--retail-line);padding:7px;border-radius:6px;background:#fff}
+#sale-discount{max-width:100%;border:1px solid var(--retail-line);padding:7px;border-radius:6px;background:#fff}
 .grand-total{border-top:1px solid var(--retail-line);padding-top:9px;font-size:18px}
 .checkout{width:100%;min-height:48px;margin:5px 0 12px}
-.sale-actions button{width:50%;min-height:43px;background:#fff4de;padding:4px}
+.sale-actions button{width:100%;min-height:43px;background:#fff4de;padding:4px}
 #saved-sales{flex-wrap:wrap;justify-content:flex-start}
 #saved-sales:empty,#sale-message:empty,.retail-message:empty{display:none}
 #saved-sales button{padding:5px 8px}
 #sale-message,.retail-message{font-size:13px;color:#914218;margin:8px 0}
-.customer-pick>div{display:flex;gap:8px;margin-top:8px}
-.customer-pick input{flex:1;min-width:0}
 .retail-empty{grid-column:1/-1;margin:0;padding:24px;color:var(--retail-muted)}
 .customer-heading{justify-content:space-between;align-items:flex-start}
 .customer-heading>div:last-child{display:flex;gap:10px;flex-wrap:wrap}
@@ -111,10 +109,19 @@
 .customer-badge.active{background:#eaf4dc;color:#345d2b}
 .customer-badge.inactive{background:#fbe5e2;color:#9b3028}
 .customer-actions button{margin-right:9px;font-size:13px}
-.customer-actions button:last-child{color:#b63d17}
+.customer-actions button:last-child,#delete-customer{color:#b63d17}
 .customer-table .retail-footer{padding:15px}
 #customer-dialog,#customer-import,#payment-dialog{max-height:calc(100dvh - 24px);overflow:auto}
 #customer-dialog form,#customer-import form,#payment-dialog form{gap:10px}
+#payment-form .primary:disabled{opacity:.55}
+#sale-receipt-dialog{max-height:calc(100dvh - 24px);overflow:auto}
+#sale-receipt-dialog pre,#sale-receipt-printout pre{font:inherit;white-space:pre-wrap;overflow-wrap:anywhere}
+#sale-receipt-printout{display:none}
+@media print{
+    body:has(#sale-receipt-dialog[open])>:not(#sale-receipt-printout),#sale-receipt-dialog::backdrop{display:none}
+    body:has(#sale-receipt-dialog[open])>#sale-receipt-printout{display:block;color:black;background:white}
+}
+#delete-customer{justify-content:center}
 @media(max-width:1180px){
     .pos-layout{gap:14px}
     .catalog-products{grid-template-columns:repeat(2,minmax(0,1fr))}
@@ -269,7 +276,7 @@
 [data-theme="dark"] #admin .sidebar{background:#27201b}
 [data-theme="dark"] .sidebar::after,[data-theme="dark"] .hero::after{opacity:.15}
 [data-theme="dark"] #admin .sidebar nav button[aria-current=page]{background:var(--retail-gold)}
-[data-theme="dark"] #admin .logout,[data-theme="dark"] .link,[data-theme="dark"] #operation-reset,[data-theme="dark"] #remove-operation,[data-theme="dark"] .operation-actions button:last-child,[data-theme="dark"] .customer-actions button:last-child,[data-theme="dark"] .row-action:last-child{color:var(--rust)}
+[data-theme="dark"] #admin .logout,[data-theme="dark"] .link,[data-theme="dark"] #operation-reset,[data-theme="dark"] #remove-operation,[data-theme="dark"] .operation-actions button:last-child,[data-theme="dark"] .customer-actions button:last-child,[data-theme="dark"] #delete-customer{color:var(--rust)}
 [data-theme="dark"] .primary{background:#a64020;color:white}
 [data-theme="dark"] .welcome-header,[data-theme="dark"] .logout,[data-theme="dark"] dialog,[data-theme="dark"] dialog input,[data-theme="dark"] dialog select,[data-theme="dark"] #operation-fields textarea,[data-theme="dark"] .stat,[data-theme="dark"] .panel,[data-theme="dark"] .recent table,[data-theme="dark"] .recent td,[data-theme="dark"] .recent th,[data-theme="dark"] .low-row,[data-theme="dark"] .schedule,[data-theme="dark"] .schedule div,[data-theme="dark"] .schedule div>*+*,[data-theme="dark"] .inventory-table,[data-theme="dark"] .inventory-table td,[data-theme="dark"] .search,[data-theme="dark"] .toolbar select,[data-theme="dark"] .filter{border-color:var(--line)}
 [data-theme="dark"] .recent table{outline-color:var(--line)}

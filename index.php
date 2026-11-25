@@ -6,6 +6,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
 }
 try {
     $account = currentAccount();
+    $maintenance = maintenanceStatus();
 } catch (RuntimeException | JsonException $error) {
     error_log('REMS account: ' . $error->getMessage());
     http_response_code(503);
@@ -14,10 +15,15 @@ try {
 $signedIn = $account !== null;
 $isCustomer = $signedIn && $account['role'] === 'customer';
 $isAdmin = $signedIn && $account['role'] === 'admin';
+$isSuperAdmin = $signedIn && $account['role'] === 'super_admin';
+$maintenanceEnabled = $maintenance['system']['enabled'];
+$pausedModules = htmlspecialchars(json_encode(pausedModules($maintenance), JSON_THROW_ON_ERROR), ENT_QUOTES, 'UTF-8');
+$showShop = $signedIn && !$isSuperAdmin && !$maintenanceEnabled;
+if ($maintenanceEnabled && !$isSuperAdmin) http_response_code(503);
 $dashboardTitle = $isAdmin ? 'Admin Dashboard' : 'Staff Dashboard';
 $needsSetup = false;
 $authUnavailable = false;
-if (!$signedIn) {
+if (!$signedIn && !$maintenanceEnabled) {
     try {
         $needsSetup = !adminIsConfigured();
     } catch (RuntimeException | JsonException $error) {
@@ -33,7 +39,9 @@ $products = [
     ['Dog Chew Toy', 'Toys', 95, 0, '🦴'],
     ['Cat litter 5kg', 'Hygiene', 325, 18, '🛍️'],
 ];
-$navigation = ['▦ Dashboard', '◎ Inventory', '🛒 Point of Sale', '♙ Customers', '♧ Pets', '⌂ Grooming & Pet Hotel', '▥ Reports', '♙ User Management'];
+$adminPages = ['Booking', 'Transaction History', 'Audit Logs', 'Reports', 'User Management'];
+$navigation = ['▦ Dashboard', '◎ Inventory', '🛒 Point of Sale', '♙ Customers', '♧ Pets', '⌂ Grooming & Pet Hotel',
+    '▣ Booking', '≡ Transaction History', '◷ Audit Logs', '▥ Reports', '♙ User Management'];
 function logo() {
     return '<div class="logo" aria-label="Rem’s Pet Supplies and Accessories Shop"><span class="logo-house">⌂</span><div><strong>Rem’s</strong><small><b>&amp;</b> Pet Supplies<br>Accessories Shop</small><em>Quality goodies for your furbabies!</em></div></div>';
 }
@@ -44,28 +52,56 @@ function logo() {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Rem’s Pet Supplies &amp; Accessories Shop</title>
-<link rel="stylesheet" href="style.css">
-<link rel="stylesheet" href="retail.css">
-<?php if ($isCustomer): ?>
-<link rel="stylesheet" href="customer.css">
-<script src="customer.js" defer></script>
-<?php elseif ($signedIn): ?>
-<script src="app.js" defer></script>
-<script src="operations.js" defer></script>
-<script src="retail.js" defer></script>
-<script src="requests.js" defer></script>
-<?php if ($isAdmin): ?><script src="staff.js" defer></script><script src="customer-admin.js" defer></script><?php endif; ?>
-<?php else: ?>
+<link rel="stylesheet" href="style.css?v=<?= filemtime(__DIR__ . '/style.css') ?>">
+<link rel="stylesheet" href="retail.css?v=<?= filemtime(__DIR__ . '/retail.css') ?>">
+<?php if ($showShop && ($isAdmin || $isCustomer)): ?>
+<script src="assets/vendor/jspdf-4.2.1.umd.min.js" defer></script>
+<script src="receipt-pdf.js?v=<?= filemtime(__DIR__ . '/receipt-pdf.js') ?>" defer></script>
+<?php endif; ?>
+<?php if ($showShop && $isCustomer): ?>
+<link rel="stylesheet" href="customer.css?v=<?= filemtime(__DIR__ . '/customer.css') ?>">
+<script src="customer.js?v=<?= filemtime(__DIR__ . '/customer.js') ?>" defer></script>
+<?php elseif ($showShop): ?>
+<script src="app.js?v=<?= filemtime(__DIR__ . '/app.js') ?>" defer></script>
+<script src="operations.js?v=<?= filemtime(__DIR__ . '/operations.js') ?>" defer></script>
+<script src="retail.js?v=<?= filemtime(__DIR__ . '/retail.js') ?>" defer></script>
+<script src="requests.js?v=<?= filemtime(__DIR__ . '/requests.js') ?>" defer></script>
+<?php if ($isAdmin): ?><script src="staff.js" defer></script><script src="customer-admin.js" defer></script>
+<script src="admin-history.js?v=<?= filemtime(__DIR__ . '/admin-history.js') ?>" defer></script><?php endif; ?>
+<?php elseif (!$signedIn): ?>
 <script src="sign-in.js" defer></script>
 <?php endif; ?>
 </head>
 <body>
-<?php if (!$signedIn): ?>
+<?php if ($isSuperAdmin): ?>
+<?php require __DIR__ . '/maintenance-dashboard.php'; ?>
+<?php elseif ($signedIn && $maintenanceEnabled): ?>
+<main class="maintenance-page">
+    <?= logo() ?>
+    <section class="maintenance-card" aria-labelledby="maintenance-title">
+        <h1 id="maintenance-title">System Under Maintenance</h1>
+        <p><?= MAINTENANCE_NOTICE ?></p>
+        <form method="post">
+            <input type="hidden" name="csrf" value="<?= $authToken ?>">
+            <input type="hidden" name="action" value="logout">
+            <button type="submit" class="filter">Sign Out</button>
+        </form>
+    </section>
+</main>
+<?php elseif (!$signedIn): ?>
 <div id="welcome">
 <header class="welcome-header">
     <?= logo() ?>
     <button class="primary welcome-action" data-auth="login">Login</button>
 </header>
+<?php if ($maintenanceEnabled): ?>
+<main class="maintenance-page">
+    <section class="maintenance-card">
+        <h1>System Under Maintenance</h1>
+        <p><?= MAINTENANCE_NOTICE ?></p>
+    </section>
+</main>
+<?php else: ?>
 <main class="hero">
     <div class="hero-copy">
         <h1><span>Welcome!</span><strong>Rem’s</strong>Pet Supplies &amp;<br>Accessories Shop</h1>
@@ -77,6 +113,7 @@ function logo() {
     <svg class="paw <?= $paw ?>" viewBox="0 0 52 54" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="3.5"><ellipse cx="10" cy="21" rx="5" ry="6"/><ellipse cx="20" cy="10" rx="5" ry="6"/><ellipse cx="33" cy="10" rx="5" ry="6"/><ellipse cx="44" cy="21" rx="5" ry="6"/><path d="M12 39c0-7 8-15 14-15s14 8 14 15c0 9-8 8-14 7s-14 2-14-7Z"/></g></svg>
     <?php endforeach; ?>
 </main>
+<?php endif; ?>
 </div>
 
 <dialog id="auth" data-unavailable="<?= $authUnavailable ? 'true' : 'false' ?>" aria-labelledby="auth-title">
@@ -98,7 +135,7 @@ function logo() {
     </form>
     <div id="auth-links" class="auth-links">
         <button type="button" class="link" id="auth-forgot">Forgot password?</button>
-        <button type="button" class="link" id="customer-auth-toggle">Create account</button>
+        <button type="button" class="link" id="customer-auth-toggle" <?= $maintenanceEnabled ? 'hidden' : '' ?>>Create account</button>
         <?php if ($needsSetup): ?><button type="button" class="link" id="admin-setup-link" data-auth="setup">Set up admin</button><?php endif; ?>
     </div>
     <div id="auth-recovery" hidden>
@@ -110,12 +147,12 @@ function logo() {
 <?php elseif ($isCustomer): ?>
 <?php require __DIR__ . '/customer.php'; ?>
 <?php else: ?>
-<div id="admin" data-csrf="<?= $authToken ?>" data-role="<?= $account['role'] ?>" data-username="<?= htmlspecialchars($account['username'], ENT_QUOTES, 'UTF-8') ?>">
+<div id="admin" data-csrf="<?= $authToken ?>" data-role="<?= $account['role'] ?>" data-username="<?= htmlspecialchars($account['username'], ENT_QUOTES, 'UTF-8') ?>" data-paused-modules="<?= $pausedModules ?>">
     <aside class="sidebar">
         <div class="admin-brand"><span aria-hidden="true">⌂<i>🐾</i></span><div><strong>Rem’s</strong><small>Pet Supplies &amp;<br>Accessories Shop</small></div></div>
         <nav aria-label="<?= $isAdmin ? 'Admin' : 'Staff' ?> navigation">
         <?php foreach ($navigation as $i => $item): [$symbol, $name] = explode(' ', $item, 2);
-            if (!$isAdmin && in_array($name, ['Reports', 'User Management'], true)) continue; ?>
+            if (!$isAdmin && in_array($name, $adminPages, true)) continue; ?>
             <button data-section="<?= htmlspecialchars($name) ?>"><span aria-hidden="true"><?= $symbol ?></span><?= htmlspecialchars($name) ?></button>
         <?php endforeach; ?>
             <button type="button" data-section="Requests"><span aria-hidden="true">⇄</span><?= $isAdmin ? 'Approvals' : 'My Requests' ?><span id="request-nav-count" class="request-nav-count" hidden></span></button>
@@ -127,6 +164,7 @@ function logo() {
         </form>
     </aside>
     <main class="workspace">
+        <p id="shop-maintenance-notice" class="retail-message maintenance-notice" role="status" hidden></p>
         <p id="shop-load-error" class="retail-message" role="alert"></p>
         <header class="admin-header">
             <span class="admin-header-title"><?= $dashboardTitle ?></span>
@@ -186,14 +224,26 @@ function logo() {
             </div>
             <div class="dashboard-grid <?= $isAdmin ? '' : 'staff-dashboard-grid' ?>">
                 <?php if ($isAdmin): ?>
-                <article class="panel recent">
-                    <h2><span class="bubble">▣</span> Recent Sales</h2>
-                    <table><thead><tr><th>Transaction ID</th><th>Customer</th><th>Date</th><th>Amount</th><th>Status</th></tr></thead><tbody>
-                    <?php foreach ([['1024','Keith Heart','Today','1,250.00'],['1023','Maria Angel','Today','850.00'],['1022','Elisha Mei','Yesterday','430.00']] as [$id,$customer,$date,$amount]): ?>
-                    <tr><td>#TRX-<?= $id ?></td><td><?= $customer ?></td><td><?= $date ?></td><td>₱<?= $amount ?></td><td><span class="complete">✓ Completed</span></td></tr>
-                    <?php endforeach; ?>
-                    </tbody><?php if ($isAdmin): ?><tfoot><tr><td colspan="5"><button class="link" data-section="Reports">View All Sales ›</button></td></tr></tfoot><?php endif; ?></table>
+                <?php $expiryColumns = ['Product', 'Category', 'Expiry Date', 'Days Left', 'Status']; ?>
+                <article class="panel recent expiry-panel">
+                    <h2><span class="bubble" aria-hidden="true">◷</span> Near Expired Products</h2>
+                    <table>
+                        <thead><tr><?php foreach ($expiryColumns as $column): ?><th scope="col"><?= $column ?></th><?php endforeach; ?></tr></thead>
+                        <tbody id="near-expiry-rows"></tbody>
+                        <tfoot><tr><td colspan="5"><button type="button" class="link" id="view-near-expiry" aria-haspopup="dialog">View All ›</button></td></tr></tfoot>
+                    </table>
                 </article>
+                <dialog id="near-expiry-dialog" aria-labelledby="near-expiry-title">
+                    <button type="button" class="close" aria-label="Close">×</button>
+                    <h2 id="near-expiry-title">Near Expired Products</h2>
+                    <p>Products expiring today or within the next 30 days.</p>
+                    <div class="near-expiry-list">
+                        <table>
+                            <thead><tr><?php foreach ($expiryColumns as $column): ?><th scope="col"><?= $column ?></th><?php endforeach; ?></tr></thead>
+                            <tbody id="all-near-expiry-rows"></tbody>
+                        </table>
+                    </div>
+                </dialog>
                 <?php endif; ?>
                 <article class="panel low">
                     <h2><span class="bubble">⚠</span> Low Stock Products <button class="link" data-section="Inventory">View All ›</button></h2>
@@ -212,10 +262,19 @@ function logo() {
         </section>
 
         <section id="inventory" hidden>
-            <div class="inventory-heading"><div><h1>Inventory</h1><p class="subtitle">Manage your products and stock levels.</p></div><button class="primary" id="add-product">＋ Add Product</button></div>
+            <div class="inventory-heading">
+                <div><h1>Inventory</h1><p class="subtitle">Manage your products and stock levels.</p></div>
+                <div class="inventory-actions">
+                    <?php if ($isAdmin): ?><button type="button" class="filter" id="download-inventory-pdf" disabled>↓ Download PDF</button><?php endif; ?>
+                    <button type="button" class="primary" id="add-item">＋ Add Item</button>
+                    <button type="button" class="primary" id="add-product">＋ Add Product</button>
+                </div>
+            </div>
+            <p class="retail-message" id="inventory-message" role="status"></p>
+            <?php if ($isAdmin): ?><p class="maintenance-notice" id="inventory-stock-warning" role="status" hidden></p><?php endif; ?>
             <div class="toolbar">
                 <label class="search"><span aria-hidden="true">⌕</span><input id="search" type="search" aria-label="Search products" placeholder="Search products..."></label>
-                <select id="category" aria-label="Category"><option value="">All Categories</option><?php foreach (array_unique(array_column($products, 1)) as $category): ?><option><?= $category ?></option><?php endforeach; ?></select>
+                <select id="category" aria-label="Category"><option value="">All Categories</option><?php foreach (array_unique([...array_column($products, 1), 'Others']) as $category): ?><option><?= $category ?></option><?php endforeach; ?></select>
                 <button class="filter" id="filter" aria-pressed="false">⚲ Filter</button>
             </div>
             <div class="stats three">
@@ -224,11 +283,12 @@ function logo() {
                 <?php endforeach; ?>
             </div>
             <div class="inventory-table">
-                <table><thead><tr><th>Product</th><th>Category</th><th>Price</th><th>Stock</th><th>Status</th><th>Actions</th></tr></thead><tbody id="product-rows"></tbody></table>
+                <table><thead><tr><th>Product</th><th>Category</th><th>Selling Price</th><th>Stock</th><th>Status</th><th>Actions</th></tr></thead><tbody id="product-rows"></tbody></table>
                 <footer><span id="product-count"></span><div class="pagination" id="pagination"></div></footer>
             </div>
         </section>
         <?php require __DIR__ . '/retail.php'; ?>
+        <?php if ($isAdmin) require __DIR__ . '/admin-history.php'; ?>
         <section id="operations" hidden aria-labelledby="operations-title">
             <div class="operation-heading">
                 <div><h1 id="operations-title"></h1><p class="subtitle" id="operations-intro"></p></div>
@@ -330,6 +390,10 @@ function logo() {
 </div>
 
 <?php if ($isAdmin): ?>
+<section id="sale-receipt-printout" aria-label="Sales Receipt">
+    <h1>Sales Receipt</h1>
+    <pre id="sale-receipt-print-details"></pre>
+</section>
 <dialog id="staff-account-dialog" aria-labelledby="staff-account-title">
     <button type="button" class="close" aria-label="Close">&times;</button>
     <h2 id="staff-account-title">Create Staff Account</h2>
@@ -362,16 +426,40 @@ function logo() {
     <button type="button" class="close" aria-label="Close">×</button>
     <h2 id="product-title"></h2>
     <form id="product-form">
-        <label>Product<input name="product" required></label>
-        <label>Category<select name="category" required><?php foreach (array_unique(array_column($products, 1)) as $category): ?><option><?= $category ?></option><?php endforeach; ?></select></label>
-        <label>Price<input name="price" type="number" min="0" step=".01" required></label>
+        <label>Product Name<input name="product" required></label>
+        <label>Category<select name="category" required><?php foreach (array_unique([...array_column($products, 1), 'Others']) as $category): ?><option><?= $category ?></option><?php endforeach; ?></select></label>
+        <label>Retail Amount<input name="retailAmount" type="number" min="0" step=".01" required></label>
+        <label>Selling Amount<input name="price" type="number" min="0" step=".01" aria-describedby="product-price-hint" required></label>
+        <small id="product-price-hint">Enter a price for one size. Choosing another weight or volume will adjust the price.</small>
         <label>Stock<input name="stock" type="number" min="0" step="1" required></label>
-        <label>Barcode (optional)<input name="barcode" inputmode="numeric"></label>
+        <label>Minimum Stock<input name="minimumStock" type="number" min="0" step="1" value="5" required></label>
+        <label>Unit Value<select name="unit" required>
+            <option value="">Choose a unit or size</option>
+            <?php foreach (['Volume' => ['50 mL', '100 mL', '150 mL', '200 mL', '250 mL', '300 mL', '500 mL', '750 mL', '1 L', '2 L', '5 L'],
+                'Weight' => ['50 g', '100 g', '250 g', '500 g', '750 g', '1 kg', '2 kg', '2.5 kg', '5 kg', '10 kg', '15 kg', '20 kg'],
+                'Count' => ['Piece', 'Pair', 'Pack', 'Box', 'Set']] as $unitGroup => $units): ?>
+                <optgroup label="<?= $unitGroup ?>"><?php foreach ($units as $unit): ?><option><?= $unit ?></option><?php endforeach; ?></optgroup>
+            <?php endforeach; ?>
+        </select></label>
+        <label>Expiry Date (optional)<input name="expiryDate" type="date"></label>
         <label id="product-photo-field">Product picture<input name="photo" type="file" accept="image/jpeg,image/png,image/webp,image/gif"></label>
         <img id="product-photo-preview" alt="Product picture preview" hidden>
+        <div id="product-barcodes" hidden></div>
         <button type="button" class="link" id="remove-product-photo" hidden>Remove picture</button>
         <p id="product-error" role="alert"></p>
         <button class="primary">Save Product</button>
+    </form>
+</dialog>
+<dialog id="inventory-item-dialog" aria-labelledby="inventory-item-title">
+    <button type="button" class="close" aria-label="Close">×</button>
+    <h2 id="inventory-item-title">Add Item</h2>
+    <form id="inventory-item-form">
+        <label>Product Name<select name="productId" required></select></label>
+        <label>Selling Price<input name="sellingPrice" readonly></label>
+        <label>Barcode<input name="itemBarcode" readonly></label>
+        <canvas id="inventory-item-barcode" width="238" height="64" aria-hidden="true" hidden></canvas>
+        <p id="inventory-item-error" class="retail-message" role="alert"></p>
+        <button type="submit" class="primary" id="save-inventory-item"><?= $isAdmin ? 'Save Item' : 'Send for Approval' ?></button>
     </form>
 </dialog>
 <script type="application/json" id="initial-products"><?= json_encode($products, JSON_HEX_TAG | JSON_UNESCAPED_UNICODE) ?></script>

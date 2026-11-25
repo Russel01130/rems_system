@@ -5,6 +5,7 @@ require_once __DIR__ . '/staff-auth.php';
 require_once __DIR__ . '/shop-data-lib.php';
 require_once __DIR__ . '/customer-lib.php';
 require_once __DIR__ . '/database.php';
+require_once __DIR__ . '/super-admin.php';
 
 const ADMIN_FILE = __DIR__ . '/admin.credentials.php';
 const ADMIN_FILE_HEADER = "<?php http_response_code(404); exit; __halt_compiler();\n";
@@ -144,6 +145,18 @@ function validateNewCredentials(string $username, string $password): void
     }
 }
 
+function auditAuthentication(array $account, string $activity, string $status = 'Success'): void
+{
+    try {
+        withShopData(true, static function (array &$data) use ($account, $activity, $status): array {
+            recordShopAudit($data, $account, 'Authentication', $activity, $status);
+            return [];
+        });
+    } catch (RuntimeException | JsonException $error) {
+        error_log('REMS sign-in audit: ' . $error->getMessage());
+    }
+}
+
 function handleAdminRequest(): void
 {
     $action = $_POST['action'] ?? '';
@@ -157,6 +170,18 @@ function handleAdminRequest(): void
         header('Location: ./', true, 303);
         exit;
     }
+    try {
+        if ($action === 'set_maintenance') handleMaintenanceChange();
+        if (isset($_SESSION['super_admin'])) {
+            authResponse(403, 'Use the Super Admin maintenance dashboard.');
+        }
+        if ($action !== 'login' && maintenanceStatus()['system']['enabled']) {
+            authResponse(503, MAINTENANCE_NOTICE);
+        }
+    } catch (RuntimeException | JsonException $error) {
+        error_log('REMS maintenance: ' . $error->getMessage());
+        authResponse(503, 'System maintenance controls are temporarily unavailable.');
+    }
     if (in_array($action, ['customer_signup', 'customer_read', 'customer_book', 'customer_order', 'customer_admin_list', 'customer_order_status'], true)) {
         try {
             if ($action === 'customer_signup') handleCustomerSignup();
@@ -166,7 +191,7 @@ function handleAdminRequest(): void
             authResponse(500, 'The customer portal is temporarily unavailable.');
         }
     }
-    if (in_array($action, ['shop_read', 'shop_status', 'shop_submit', 'shop_save', 'shop_decide'], true)) {
+    if (in_array($action, ['shop_read', 'shop_status', 'shop_submit', 'shop_save', 'shop_decide', 'sale_receipt_download', 'audit_read'], true)) {
         try {
             handleShopRequest($action);
         } catch (RuntimeException | JsonException | ValueError $error) {
@@ -194,6 +219,7 @@ function handleAdminRequest(): void
     try {
         $staff = null;
         $customer = null;
+        $superAdmin = null;
         if ($action === 'setup') {
             validateNewCredentials($username, $password);
             if (!createAdmin($username, $password)) {
@@ -204,7 +230,16 @@ function handleAdminRequest(): void
             if (($_SESSION['retry_at'] ?? 0) > $now) {
                 authResponse(429, 'Too many attempts. Wait one minute and try again.');
             }
-            $verified = verifyAdmin($username, $password);
+            $superAdmin = verifySuperAdmin($username, $password);
+            if ($superAdmin === null && maintenanceStatus()['system']['enabled']) {
+                $_SESSION['attempts'] = ($_SESSION['attempts'] ?? 0) + 1;
+                if ($_SESSION['attempts'] >= 5) {
+                    $_SESSION['attempts'] = 0;
+                    $_SESSION['retry_at'] = $now + 60;
+                }
+                authResponse(503, MAINTENANCE_NOTICE);
+            }
+            $verified = $superAdmin ?? verifyAdmin($username, $password);
             if ($verified === null) {
                 $candidate = staffAccounts()[strtolower($username)] ?? null;
                 if ($candidate && $candidate['active'] && password_verify($password, $candidate['hash'])) {
@@ -221,6 +256,7 @@ function handleAdminRequest(): void
                 if ($_SESSION['attempts'] >= 5) {
                     $_SESSION['attempts'] = 0;
                     $_SESSION['retry_at'] = $now + 60;
+                    auditAuthentication(['username' => 'System', 'role' => 'system'], 'Failed sign-in attempts reached the retry limit.', 'Warning');
                 }
                 authResponse(401, 'The username or password is incorrect.');
             }
@@ -230,7 +266,9 @@ function handleAdminRequest(): void
             throw new RuntimeException('Cannot rotate the admin session.');
         }
         $_SESSION = ['csrf' => bin2hex(random_bytes(32))];
-        if ($customer) {
+        if ($superAdmin !== null) {
+            $_SESSION['super_admin'] = $superAdmin;
+        } elseif ($customer) {
             $_SESSION['customer'] = $customer;
         } elseif ($staff) {
             $_SESSION['staff'] = $staff['username'];
@@ -238,6 +276,7 @@ function handleAdminRequest(): void
         } else {
             $_SESSION['admin'] = $username;
         }
+        auditAuthentication(currentAccount(), 'Signed in successfully.');
         authResponse(200);
     } catch (RuntimeException | JsonException | ValueError $error) {
         error_log('REMS authentication: ' . $error->getMessage());

@@ -1,5 +1,6 @@
 /admin.credentials.php
 /staff.credentials.php
+/super-admin.credentials.php
 /shop-data.php
 /shop-lock.php
 /shop-write-*.php

@@ -1,6 +1,8 @@
 ﻿const isStaff = admin.dataset.role === 'staff';
 let shopRevision = null;
 let shopRequests = [];
+let saleReceiptIds = new Set();
+let transactionDetails = {};
 let renderedRequestKey = '';
 let displayedSummaryKey;
 let statusLoading = false;
@@ -25,11 +27,15 @@ async function shopRequest(action, fields = {}) {
 function acceptShop(data) {
     if (shopRevision !== null && data.revision < shopRevision) return;
     shopRevision = data.revision;
+    admin.dataset.pausedModules = JSON.stringify(data.pausedModules ?? []);
     shopRequests = data.requests;
+    saleReceiptIds = new Set(data.saleReceiptIds ?? []);
+    transactionDetails = data.transactionDetails ?? {};
     updateRequestSummary(requestSummary(shopRequests));
     if (data.shop) {
         products = data.shop.products;
         records = data.shop.records;
+        document.dispatchEvent(new Event('rems:shop-updated'));
     }
 }
 
@@ -94,13 +100,27 @@ function applyApprovedRequest(request) {
     const nextRecords = { ...records };
     if (type === 'product_add' || type === 'product_edit') {
         const index = requestEntries(products, before, row => row[6] === before[6]);
+        const specs = entry?.[8];
+        const itemBarcodes = specs?.itemBarcodes ?? [];
+        const validSpecs = specs === undefined || (specs && typeof specs === 'object' && !Array.isArray(specs) &&
+            (specs.retailAmount === undefined || validMoney(specs.retailAmount)) &&
+            (specs.minimumStock === undefined || Number.isSafeInteger(specs.minimumStock) && specs.minimumStock >= 0) &&
+            (specs.unit === undefined || unitsForCategory(entry[1]).includes(specs.unit) ||
+                (before?.[1] === entry[1] && before?.[8]?.unit === specs.unit)) &&
+            (specs.expiryDate === undefined || validExpiryDate(specs.expiryDate)) &&
+            (specs.pricingBasis === undefined || (typeof specs.pricingBasis?.unit === 'string' &&
+                priceForUnit(specs.pricingBasis, specs.unit) === cents(entry[2]))) &&
+            Array.isArray(itemBarcodes) && itemBarcodes.every(validItemBarcode) &&
+            new Set(itemBarcodes).size === itemBarcodes.length && !itemBarcodes.includes(entry[7]));
+        const barcodes = validSpecs && Array.isArray(entry) ? productBarcodes(entry) : [];
         if ((type === 'product_edit') !== (index >= 0) || !Array.isArray(entry) ||
             !requestText(entry[0], true) || !requestText(entry[1], true) || !validMoney(entry[2]) ||
             !Number.isSafeInteger(entry[3]) || entry[3] < 0 || !requestText(entry[4]) || !requestPhoto(entry[5]) ||
-            !requestText(entry[6], true) || !requestText(entry[7]) ||
+            !requestText(entry[6], true) || !requestText(entry[7]) || !validSpecs ||
             (index >= 0 && entry[6] !== before[6]) ||
             products.some((row, i) => i !== index && (row[6] === entry[6] ||
-                (entry[7] && row[7] === entry[7]) || (row[1] === entry[1] && row[0].toLowerCase() === entry[0].toLowerCase())))) {
+                productBarcodes(row).some(code => barcodes.includes(code)) ||
+                sameProductVariant(row, entry[0], entry[1], specs?.unit ?? '')))) {
             throw new Error('The product details conflict with existing records or contain invalid values.');
         }
         nextProducts = [...products];
@@ -154,7 +174,7 @@ function applyApprovedRequest(request) {
 }
 
 function applySaleRequest(request) {
-    const { lines, discount, total, customer } = request.payload;
+    const { lines, discountType, discount, total, customer } = request.payload;
     if (!Array.isArray(lines) || !lines.length || !validMoney(discount) || !validMoney(total) || !requestText(customer, true)) {
         throw new Error('The cart is invalid.');
     }
@@ -171,11 +191,15 @@ function applySaleRequest(request) {
         subtotal += cents(item[2]) * quantity;
     }
     const name = records.Customers.find(([name]) => name.toLowerCase() === customer.toLowerCase())?.[0];
+    if (discountType !== undefined &&
+        (!validDiscountType(discountType) || discountForSubtotal(discountType, subtotal) !== cents(discount))) {
+        throw new Error('The discount does not match the selected discount type.');
+    }
     if ((customer.toLowerCase() !== 'walk-in' && !name) || subtotal - cents(discount) !== cents(total)) {
         throw new Error('The sale total or customer needs updating.');
     }
     const date = localDate();
-    const details = products.filter(product => picked.has(product[6])).map(product => picked.get(product[6]) + ' × ' + product[0]).join(', ');
+    const details = products.filter(product => picked.has(product[6])).map(product => picked.get(product[6]) + ' × ' + productLabel(product)).join(', ');
     const sale = ['#TRX-' + request.id.toUpperCase(), name ?? 'Walk-in', date, details, total];
     return {
         products: products.map(product => picked.has(product[6]) ? [product[0], product[1], product[2], product[3] - picked.get(product[6]), ...product.slice(4)] : product),
@@ -198,14 +222,15 @@ function requestDetails(request, card) {
         if (Array.isArray(payload.lines)) for (const line of payload.lines) {
             if (Array.isArray(line)) details.append(retailNode('p', '', line[1] + ' × ' + line[2] + ' · ' + pesos(line[3])));
         }
-        details.append(retailNode('p', '', 'Discount ' + pesos(payload.discount) + ' · Total ' + pesos(payload.total)));
+        const label = validDiscountType(payload.discountType) ? saleDiscountLabels[payload.discountType] : 'Discount';
+        details.append(retailNode('p', '', label + ' ' + pesos(payload.discount) + ' · Total ' + pesos(payload.total)));
     } else if (type === 'customer_import') {
         if (Array.isArray(payload.entries)) for (const entry of payload.entries) {
             if (Array.isArray(entry)) details.append(retailNode('p', '', [entry[0], entry[1], entry[2], entry[4]].filter(Boolean).join(' · ')));
         }
     } else {
         const fields = type.startsWith('product_')
-            ? [[0, 'Product'], [1, 'Category'], [2, 'Price'], [3, 'Stock'], [7, 'Barcode']]
+            ? [[0, 'Product'], [1, 'Category'], [2, 'Selling amount'], [3, 'Stock'], [7, 'Barcode']]
             : type.startsWith('pet_') ? [[0, 'Pet'], [1, 'Owner'], [2, 'Species'], [3, 'Breed'], [4, 'Care notes']]
                 : [[0, 'Customer'], [1, 'Phone'], [2, 'Email'], [4, 'Status']];
         const record = payload.entry ?? payload.before;
@@ -218,6 +243,21 @@ function requestDetails(request, card) {
                         ? (before || '—') + ' → ' + (after || (after === 0 ? '0' : '—')) : after;
                     details.append(retailNode('p', '', label + ' · ' + String(value ?? '—')));
                 }
+            }
+            if (type.startsWith('product_') && record[8]) {
+                const specs = record[8];
+                for (const [key, label] of [['retailAmount', 'Retail amount'], ['minimumStock', 'Minimum stock'],
+                    ['unit', 'Unit value'], ['expiryDate', 'Expiry date']]) {
+                    const after = specs[key];
+                    const before = payload.before?.[8]?.[key];
+                    if (after !== undefined && after !== before) {
+                        details.append(retailNode('p', '', label + ' · ' + (after === '' ? '—' : String(after))));
+                    }
+                }
+                const previousCodes = payload.before?.[8]?.itemBarcodes;
+                const oldCodes = Array.isArray(previousCodes) ? previousCodes : [];
+                const newCodes = Array.isArray(specs.itemBarcodes) ? specs.itemBarcodes.filter(code => !oldCodes.includes(code)) : [];
+                if (newCodes.length) details.append(retailNode('p', '', 'New item barcode · ' + newCodes.join(', ')));
             }
             if ((type.startsWith('pet_') || type.startsWith('product_')) && record[5] && requestPhoto(record[5])) {
                 const image = retailNode('span', 'pet-photo-preview');
@@ -349,12 +389,17 @@ async function checkRequestStatus() {
             summary.revision > shopRevision && !document.querySelector('dialog[open]')) {
             const update = await shopRequest('shop_read');
             if (document.querySelector('dialog[open]') || decisionInFlight) return;
+            const previousModules = admin.dataset.pausedModules;
             acceptShop(update);
+            if (previousModules !== admin.dataset.pausedModules) {
+                showSection(admin.dataset.page);
+                return;
+            }
             refreshDashboard();
             const page = admin.dataset.page;
             if (page === 'Inventory') renderProducts();
             else if (page === 'Customers') renderCustomers();
-            else if (page === 'Point of Sale') { renderCategories(); renderCustomerOptions(); refreshSale(); }
+            else if (page === 'Point of Sale') { renderCategories(); refreshSale(); }
             else if (['Pets', scheduleName, 'Reports', staffName].includes(page)) renderOperation();
         }
     } catch {

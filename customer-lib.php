@@ -61,6 +61,12 @@ function customerIdentity(array &$data, string $username): array
     return $row;
 }
 
+function customerProductLabel(array $product): string
+{
+    $unit = $product[8]['unit'] ?? '';
+    return $unit === '' ? $product[0] : $product[0] . ' · ' . $unit;
+}
+
 function customerPortal(array $data, string $username): array
 {
     $shop = $data['shop'];
@@ -88,8 +94,9 @@ function customerPortal(array $data, string $username): array
     }
     return [
         'ready' => $shop !== null,
+        'pausedModules' => pausedModules(maintenanceSettings($data)),
         'products' => array_map(static fn(array $row): array => [
-            'id' => $row[6], 'name' => $row[0], 'category' => $row[1], 'price' => $row[2],
+            'id' => $row[6], 'name' => customerProductLabel($row), 'category' => $row[1], 'price' => $row[2],
             'stock' => $row[3], 'icon' => $row[4] ?? '🐾', 'photo' => $row[5] ?? '',
         ], $shop['products'] ?? []),
         'days' => $days,
@@ -215,7 +222,7 @@ function placeCustomerOrder(array &$data, string $username): string
         $price = (int) round($product[2] * 100);
         if ($price !== $quotedPrice) authResponse(409, 'A product price changed. Review your cart before ordering.');
         $total += $price * $quantity;
-        $items[] = ['id' => $id, 'name' => $product[0], 'quantity' => $quantity, 'price' => $price / 100];
+        $items[] = ['id' => $id, 'name' => customerProductLabel($product), 'quantity' => $quantity, 'price' => $price / 100];
         $product[3] -= $quantity;
         unset($product);
     }
@@ -238,11 +245,22 @@ function handleCustomerPortal(string $action): never
     }
     $write = in_array($action, ['customer_book', 'customer_order', 'customer_order_status'], true);
     $result = withShopData($write, static function (array &$data) use ($action, $account, $admin, $write): array {
+        if ($action === 'customer_book') requireModuleOnline($data, 'booking');
+        if (in_array($action, ['customer_order', 'customer_order_status'], true)) requireModuleOnline($data, 'pickup');
         if ($write && $data['shop'] === null) authResponse(409, 'The shop is getting ready. Try again later.');
+        $previousRevision = $data['revision'];
         $message = '';
         if ($action === 'customer_book') $message = bookCustomerAppointment($data, $account['username']);
         if ($action === 'customer_order') $message = placeCustomerOrder($data, $account['username']);
         if ($action === 'customer_order_status') $message = resolveCustomerOrder($data);
+        if ($data['revision'] !== $previousRevision) {
+            if ($action === 'customer_order_status' && $_POST['status'] === 'Completed') {
+                $data['transactionDetails'][$_POST['id']] = ['processedBy' => $account['username'], 'timestamp' => gmdate('c')];
+            }
+            $area = $action === 'customer_book' ? 'Booking' : 'Pickup Orders';
+            $activity = $action === 'customer_order_status' ? $message . ' ' . $_POST['id'] : $message;
+            recordShopAudit($data, $account, $area, $activity);
+        }
         if (!$admin) return ['notice' => $message, 'portal' => customerPortal($data, $account['username'])];
         $accounts = array_map(static fn(array $row): array => [
             'username' => $row['username'], 'name' => $row['name'], 'email' => $row['email'], 'created' => $row['created'],

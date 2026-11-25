@@ -57,6 +57,9 @@ function fileStaffAccounts(): array
 
 function currentAccount(): ?array
 {
+    if (isset($_SESSION['super_admin'])) {
+        return ['username' => $_SESSION['super_admin'], 'role' => 'super_admin'];
+    }
     // Preserve sessions created before staff accounts were added.
     if (isset($_SESSION['admin'])) {
         return ['username' => $_SESSION['admin'], 'role' => 'admin'];

@@ -4,7 +4,7 @@ if (empty($isCustomer)) {
     exit;
 }
 ?>
-<div class="customer-portal" id="customer-portal" data-csrf="<?= $authToken ?>">
+<div class="customer-portal" id="customer-portal" data-csrf="<?= $authToken ?>" data-paused-modules="<?= $pausedModules ?>">
     <header class="portal-header">
         <?= logo() ?>
         <nav aria-label="Customer navigation">
@@ -20,6 +20,7 @@ if (empty($isCustomer)) {
     </header>
     <main class="portal-content">
         <p class="portal-status" id="portal-status" role="status"></p>
+        <p class="maintenance-notice" id="portal-booking-maintenance" role="status" hidden>Appointments are under maintenance. Please try again later.</p>
         <section id="portal-shop" aria-labelledby="portal-shop-title">
             <div class="portal-heading">
                 <div><h1 id="portal-shop-title">Shop Pet Supplies</h1><p>Reserve products online and pay when you pick them up.</p></div>
@@ -34,6 +35,7 @@ if (empty($isCustomer)) {
                     <h2>Your Cart <span id="portal-cart-count"></span></h2>
                     <div id="portal-cart-lines"></div>
                     <p class="portal-total"><span>Total</span><strong id="portal-cart-total"></strong></p>
+                    <p class="maintenance-notice" id="portal-pickup-maintenance" hidden>Pickup reservations are under maintenance.</p>
                     <button type="button" class="primary" id="portal-order" disabled>Reserve for Pickup</button>
                 </aside>
             </div>
@@ -71,4 +73,17 @@ if (empty($isCustomer)) {
             </div>
         </section>
     </main>
+    <dialog class="portal-receipt" id="portal-receipt" aria-labelledby="portal-receipt-title">
+        <h2 id="portal-receipt-title">Pickup Order Receipt</h2>
+        <pre id="portal-receipt-details"></pre>
+        <form method="dialog" class="portal-receipt-actions">
+            <button class="filter" autofocus>Close</button>
+            <button type="button" class="primary" id="portal-receipt-download">Download PDF</button>
+            <button type="button" class="primary" id="portal-receipt-print">Print Receipt</button>
+        </form>
+    </dialog>
+    <section class="portal-receipt-printout" aria-labelledby="portal-print-title">
+        <h1 id="portal-print-title">Pickup Order Receipt</h1>
+        <pre id="portal-print-details"></pre>
+    </section>
 </div>

@@ -23,16 +23,18 @@ if (empty($signedIn)) {
             <div id="cart-lines"></div>
             <div class="sale-totals">
                 <div><span>Subtotal</span><strong id="sale-subtotal"></strong></div>
-                <div><label>Discount <input id="sale-discount" type="number" min="0" step=".01" value="0"></label><span id="discount-total"></span></div>
+                <div><label>Discount
+                    <select id="sale-discount">
+                        <option value="">No Discount</option>
+                        <option value="senior">Senior Citizen (20%)</option>
+                        <option value="pwd">PWD (20%)</option>
+                    </select>
+                </label><span id="discount-total"></span></div>
                 <div class="grand-total"><strong>Total</strong><strong id="sale-total"></strong></div>
                 <button class="primary checkout" id="checkout">▤ &nbsp; Checkout / Payment</button>
-                <div class="sale-actions"><button id="hold-sale">Ⅱ &nbsp; Hold Sale</button><button id="park-sale">▣ &nbsp; Park Sale</button></div>
+                <div class="sale-actions"><button type="button" id="hold-sale">Ⅱ &nbsp; Hold Sale</button></div>
                 <div id="saved-sales"></div>
                 <p id="sale-message" role="status"></p>
-            </div>
-            <div class="customer-pick">
-                <label for="sale-customer">Customer (Optional)</label>
-                <div><input id="sale-customer" list="sale-customers" placeholder="Search customer…"><datalist id="sale-customers"></datalist><button id="sale-add-customer" aria-label="Add customer">♙＋</button></div>
             </div>
         </aside>
     </div>
@@ -65,8 +67,15 @@ if (empty($signedIn)) {
 
         <label>Status<select name="status"><option>Active</option><option>Inactive</option></select></label>
         <p class="retail-message" id="customer-error" role="alert"></p>
-        <button class="primary">Save Customer</button>
+        <button type="submit" class="primary" id="save-customer">Save Customer</button>
+        <button type="button" class="filter" id="delete-customer" hidden>Delete Customer</button>
     </form>
+</dialog>
+<dialog id="sale-receipt-dialog" aria-labelledby="sale-receipt-title">
+    <button type="button" class="close" aria-label="Close">×</button>
+    <h2 id="sale-receipt-title">Sales Receipt</h2>
+    <pre id="sale-receipt-details"></pre>
+    <button type="button" class="primary" id="print-sale-receipt" autofocus>Print Receipt</button>
 </dialog>
 <dialog id="customer-import">
     <button type="button" class="close" aria-label="Close">×</button>
@@ -86,6 +95,6 @@ if (empty($signedIn)) {
         <label>Cash received<input type="number" name="cash" step=".01" required></label>
         <p id="payment-change"></p>
         <p class="retail-message" id="payment-error" role="alert"></p>
-        <button class="primary">Complete Sale</button>
+        <button type="submit" class="primary">Complete Sale</button>
     </form>
 </dialog>
