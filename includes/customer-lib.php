@@ -1,16 +1,20 @@
 <?php
+// Customer portal endpoints for account registration, pet profiles, pickup reservations and bookings. Ownership is checked against the signed-in account before records are read or changed.
 declare(strict_types=1);
 
+// Customer booking capacity is defined using Manila times and a daily maximum.
 const CUSTOMER_SLOTS = ['09:00', '10:00', '11:00', '13:00', '14:00'];
 const DAILY_BOOKING_LIMIT = 5;
 const APPOINTMENTS = 'Grooming & Pet Hotel';
 const CUSTOMER_PET_SPECIES = ['Dog', 'Cat', 'Bird', 'Rabbit'];
 
+// Returns the current time in Asia/Manila for appointment dates, sales dates and deadline comparisons.
 function manilaNow(): DateTimeImmutable
 {
     return new DateTimeImmutable('now', new DateTimeZone('Asia/Manila'));
 }
 
+// Counts occupied times per day while excluding rejected, expired and cancelled appointments.
 function bookingCounts(array $appointments): array
 {
     $days = [];
@@ -24,6 +28,7 @@ function bookingCounts(array $appointments): array
     return $days;
 }
 
+// Enforces booking capacity and protects customer-linked appointments from edits through a full shop snapshot.
 function checkAppointmentChanges(array $old, array $new): void
 {
     $managed = static function (array $rows): array {
@@ -48,6 +53,7 @@ function checkAppointmentChanges(array $old, array $new): void
     }
 }
 
+// Finds or creates a shop customer record for the signed-in account using a stable CUST-WEB identifier.
 function customerIdentity(array &$data, string $username): array
 {
     $key = strtolower($username);
@@ -71,17 +77,20 @@ function customerIdentity(array &$data, string $username): array
     return $row;
 }
 
+// Combines the product name with its unit for carts, receipts and order history.
 function customerProductLabel(array $product): string
 {
     $unit = $product[8]['unit'] ?? '';
     return $unit === '' ? $product[0] : $product[0] . ' · ' . $unit;
 }
 
+// Checks whether a saved pet already has the complete registration details required by Pet Management.
 function customerPetRegistered(array $pet): bool
 {
     return ($pet[3] ?? '') !== '' && ($pet[5] ?? '') !== '' && ($pet[6] ?? '') !== '';
 }
 
+// Builds the customer’s catalog, booking availability, pets, orders and notices. Photos are included only when requested.
 function customerPortal(array $data, string $username, bool $includePetPhotos = false): array
 {
     $shop = $data['shop'];
@@ -128,6 +137,7 @@ function customerPortal(array $data, string $username, bool $includePetPhotos = 
     ];
 }
 
+// Verifies the password hash for a customer username and returns the identity needed for the session.
 function verifyCustomer(string $username, string $password): ?array
 {
     return withShopData(false, static function (array $data) use ($username, $password): array {
@@ -137,6 +147,7 @@ function verifyCustomer(string $username, string $password): ?array
     }) ?: null;
 }
 
+// Validates the registration form, prevents duplicate accounts, saves a password hash and rotates the session.
 function handleCustomerSignup(): never
 {
     $username = $_POST['username'] ?? '';
@@ -173,6 +184,7 @@ function handleCustomerSignup(): never
     authResponse(200);
 }
 
+// Validates the name, species and image before adding a pet or completing an older profile for the same owner.
 function registerCustomerPet(array &$data, string $username): string
 {
     $input = shopInput('pet', 460_000);
@@ -208,11 +220,13 @@ function registerCustomerPet(array &$data, string $username): string
         $data['revision']++;
         return 'Pet registration completed.';
     }
+    // Keep care notes at index 4 and the optional owner-provided marking at index 6.
     $pets[] = [$input['name'], $owner, $input['species'], $input['breed'], '', $photo, $input['marking']];
     $data['revision']++;
     return 'Pet registered.';
 }
 
+// Checks the chosen service, time slot and pet ownership before saving a pending customer appointment.
 function bookCustomerAppointment(array &$data, string $username): string
 {
     $input = shopInput('booking', 3000);
@@ -245,12 +259,14 @@ function bookCustomerAppointment(array &$data, string $username): string
         break;
     }
     if ($registeredPet === null) authResponse(422, 'Choose a pet from your account in Pet Management.');
+    // Use the stored pet name and the signed-in username instead of client-supplied ownership details.
     $id = 'BK-' . strtoupper(bin2hex(random_bytes(5)));
     $appointments[] = [$registeredPet, $service, $date, $time, 'Pending', '', $id, $username];
     $data['revision']++;
     return 'Appointment request sent for approval. Reference ' . $id . '.';
 }
 
+// Reserves stock using the selected variant IDs and current prices. The checkout ID protects against duplicate submissions.
 function placeCustomerOrder(array &$data, string $username): string
 {
     $input = shopInput('cart', 20000);
@@ -280,6 +296,7 @@ function placeCustomerOrder(array &$data, string $username): string
         if ($price !== $quotedPrice) authResponse(409, 'A product price changed. Review your cart before ordering.');
         $total += $price * $quantity;
         $items[] = ['id' => $id, 'name' => customerProductLabel($product), 'quantity' => $quantity, 'price' => $price / 100];
+        // Reserve stock while processing checkout. All lines are saved together when the operation succeeds.
         $product[3] -= $quantity;
         unset($product);
     }
@@ -291,6 +308,7 @@ function placeCustomerOrder(array &$data, string $username): string
     return 'Order reserved. Reference ' . $id . '. Pay when you pick it up.';
 }
 
+// Dispatches customer, staff and admin actions according to role, then returns the relevant portal or dashboard data.
 function handleCustomerPortal(string $action): never
 {
     $account = currentAccount();
@@ -316,6 +334,7 @@ function handleCustomerPortal(string $action): never
         if ($action === 'customer_order') $message = placeCustomerOrder($data, $account['username']);
         if ($action === 'customer_order_status') $message = resolveCustomerOrder($data);
         if ($action === 'customer_booking_status') $message = resolveCustomerBooking($data);
+        // Only mark IDs that are in the signed-in account’s own inbox.
         if ($action === 'customer_read_notifications') {
             $ids = shopInput('notifications', 1_000_000);
             $submitted = array_flip(array_filter($ids, 'is_string'));
@@ -355,6 +374,7 @@ function handleCustomerPortal(string $action): never
     authResponse(200, '', $result);
 }
 
+// Completes a pickup by recording the sale or cancels it by restoring its reserved stock.
 function resolveCustomerOrder(array &$data): string
 {
     $id = $_POST['id'] ?? '';

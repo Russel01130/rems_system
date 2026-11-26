@@ -1,4 +1,5 @@
 <?php
+// Shared Staff Login Accounts panel. The browser fills the list with active and disabled accounts.
 if (empty($isAdmin) && empty($isSuperAdmin)) {
     http_response_code(404);
     exit;

@@ -1,4 +1,5 @@
 <?php
+// Server-rendered Super Admin audit page with validated filters, escaped event text and paginated results.
 if (empty($isSuperAdmin)) {
     http_response_code(404);
     exit;
@@ -29,6 +30,7 @@ $pageLink = static fn(int $number): string => '?' . http_build_query(
 <?php if ($logs === null): ?>
 <p role="alert">Audit logs are temporarily unavailable.</p>
 <?php else: ?>
+<!-- Audit filters travel in GET parameters so pagination can retain the chosen criteria. -->
 <form method="get" class="history-filters" aria-label="Audit log filters">
     <input type="hidden" name="maintenance" value="audit">
     <div class="history-filter-options">

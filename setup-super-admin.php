@@ -1,6 +1,8 @@
 <?php
+// CLI-only first-time setup for the Super Admin. It stores a password hash in a protected local file and fails if setup already exists.
 declare(strict_types=1);
 
+// Reject browser requests before accepting setup arguments.
 if (PHP_SAPI !== 'cli') {
     http_response_code(404);
     exit;
@@ -20,6 +22,7 @@ $credentials = ADMIN_FILE_HEADER . json_encode([
     'hash' => password_hash($password, PASSWORD_DEFAULT),
 ], JSON_THROW_ON_ERROR);
 
+// Open the protected credential file in exclusive creation mode so existing setup cannot be replaced.
 $file = @fopen(SUPER_ADMIN_FILE, 'xb');
 if ($file === false) {
     fwrite(STDERR, "Super Admin already exists or the credential file could not be created.\n");

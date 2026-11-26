@@ -1,8 +1,11 @@
 <?php
+// Appointment status transitions, reminder scheduling, no-show processing and customer inbox entries. Appointment rows use pet, service, date, time, status, notes, reference, customer username and optional event metadata.
 declare(strict_types=1);
 
+// This is the appointment slot shown in notices, including the Pet Hotel check-in slot.
 const APPOINTMENT_DURATION_MINUTES = 60;
 
+// Parses a stored date and time as a Manila appointment start and rejects invalid legacy values.
 function appointmentStart(array $row): ?DateTimeImmutable
 {
     $value = ($row[2] ?? '') . ' ' . ($row[3] ?? '');
@@ -10,6 +13,7 @@ function appointmentStart(array $row): ?DateTimeImmutable
     return $start && $start->format('Y-m-d H:i') === $value ? $start : null;
 }
 
+// Determines whether a request has expired or a scheduled visit has passed the no-show deadline.
 function elapsedBookingStatus(array $row, DateTimeImmutable $now): ?string
 {
     if (empty($row[7])) return null;
@@ -22,6 +26,7 @@ function elapsedBookingStatus(array $row, DateTimeImmutable $now): ?string
     };
 }
 
+// Identifies a scheduled visit whose two-hour reminder is due and has yet to be recorded.
 function bookingReminderDue(array $row, DateTimeImmutable $now): bool
 {
     if (empty($row[7]) || ($row[4] ?? '') !== 'Scheduled' || !empty($row[8]['remindedAt'])) return false;
@@ -29,14 +34,17 @@ function bookingReminderDue(array $row, DateTimeImmutable $now): bool
     return $start !== null && $now >= $start->modify('-2 hours');
 }
 
+// Records the reminder once in appointment metadata so it can stay visible in the customer inbox.
 function storeBookingReminder(array &$row, DateTimeImmutable $now): void
 {
     $metadata = is_array($row[8] ?? null) ? $row[8] : [];
     $due = appointmentStart($row)->modify('-2 hours');
     $approved = isset($metadata['decidedAt']) ? new DateTimeImmutable($metadata['decidedAt']) : $due;
+    // Late processing still uses the scheduled delivery time, or the approval time if it came later.
     $row[8] = $metadata + ['decision' => 'approved', 'remindedAt' => min($now, max($due, $approved))->format(DATE_ATOM)];
 }
 
+// Checks for due events and takes a write lock only when a reminder, request expiry or no-show needs to be saved.
 function refreshBookingDeadlines(): void
 {
     $now = manilaNow();
@@ -65,12 +73,14 @@ function refreshBookingDeadlines(): void
     });
 }
 
+// Counts customer-submitted appointments awaiting a decision for the Staff Booking badge.
 function pendingBookingCount(array $data): int
 {
     return count(array_filter($data['shop']['records'][APPOINTMENTS] ?? [],
         static fn(array $row): bool => ($row[4] ?? '') === 'Pending' && !empty($row[7])));
 }
 
+// Checks each appointment status transition and records the decision so the customer automatically receives a portal notice.
 function resolveCustomerBooking(array &$data): string
 {
     $id = $_POST['id'] ?? '';
@@ -110,6 +120,7 @@ function resolveCustomerBooking(array &$data): string
     authResponse(409, 'This appointment is no longer eligible for that action.');
 }
 
+// Builds the inbox from appointment events, adds stable IDs and read flags, and sorts dated notices newest first.
 function customerBookingNotices(array $bookings, DateTimeImmutable $now, array $read = []): array
 {
     $notices = [];

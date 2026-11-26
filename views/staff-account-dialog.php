@@ -1,4 +1,5 @@
 <?php
+// Shared staff creation dialog for authorized Admin and Super Admin pages. The form submits its CSRF token and credentials to the server.
 if (empty($isAdmin) && empty($isSuperAdmin)) {
     http_response_code(404);
     exit;

@@ -1,4 +1,6 @@
-﻿const isStaff = admin.dataset.role === 'staff';
+﻿/* Dashboard API client and staff approval workflow. It synchronizes revisions, validates proposals and polls for changes. */
+
+const isStaff = admin.dataset.role === 'staff';
 let shopRevision = null;
 let shopRequests = [];
 let saleReceiptIds = new Set();
@@ -7,12 +9,14 @@ let renderedRequestKey = '';
 let displayedSummaryKey;
 let statusLoading = false;
 let decisionInFlight = false;
+// Labels keep request actions readable for staff and administrators while storage uses stable action keys.
 const requestLabels = {
     product_add: 'Add product', product_edit: 'Edit product', pet_add: 'Add pet', pet_edit: 'Edit pet',
     pet_remove: 'Remove pet', customer_add: 'Add customer', customer_edit: 'Edit customer',
     customer_import: 'Import customers', sale: 'Complete sale'
 };
 
+// Sends a dashboard action with its CSRF token and exposes server conflict or permission messages.
 async function shopRequest(action, fields = {}) {
     const body = new FormData();
     body.set('action', action);
@@ -24,6 +28,7 @@ async function shopRequest(action, fields = {}) {
     return data;
 }
 
+// Updates the Staff Booking tab’s badge with the pending appointment count.
 function updateBookingCount(count) {
     const badge = retail('#booking-nav-count');
     if (!badge) return;
@@ -32,6 +37,7 @@ function updateBookingCount(count) {
     badge.setAttribute('aria-label', count + ' pending appointment requests');
 }
 
+// Applies a current shop snapshot and broadcasts the update so views share the same revision.
 function acceptShop(data) {
     if (shopRevision !== null && data.revision < shopRevision) return;
     shopRevision = data.revision;
@@ -48,6 +54,7 @@ function acceptShop(data) {
     }
 }
 
+// Loads shared state and lets the administrator create the initial snapshot when no shop exists yet.
 async function initializeShop() {
     try {
         const current = await shopRequest('shop_read');
@@ -62,6 +69,7 @@ async function initializeShop() {
     showSection('Dashboard');
 }
 
+// Saves administrator changes using the last known revision so stale clients cannot overwrite newer records.
 async function saveSharedShop(nextProducts, nextRecords) {
     if (isStaff) throw new Error('Send this change to the admin for approval.');
     if (shopRevision === null) throw new Error('Refresh the page before changing shop records.');
@@ -71,6 +79,7 @@ async function saveSharedShop(nextProducts, nextRecords) {
 }
 
 let sendingShopRequest = false;
+// Submits a staff proposal for approval and refreshes its request status.
 async function sendShopRequest(type, payload) {
     if (sendingShopRequest) throw new Error('A request is already being sent.');
     sendingShopRequest = true;
@@ -84,6 +93,7 @@ async function sendShopRequest(type, payload) {
     }
 }
 
+// Finds the target record and checks that it still matches the version included with the request.
 function requestEntries(entries, before, match) {
     const index = before ? entries.findIndex(match) : -1;
     if (before && (index < 0 || JSON.stringify(entries[index]) !== JSON.stringify(before))) {
@@ -92,15 +102,18 @@ function requestEntries(entries, before, match) {
     return index;
 }
 
+// Validates string fields before applying a staff proposal.
 function requestText(value, required = false) {
     return typeof value === 'string' && value.length <= 500 && (!required || value.trim().length > 0);
 }
 
+// Accepts empty or supported inline image values while rejecting unsupported sources.
 function requestPhoto(value) {
     return value === '' || (typeof value === 'string' && (
         /^assets\/catalog-[1-6]\.jpg$/.test(value) || /^data:image\/(?:jpeg|png|webp);base64,[A-Za-z0-9+/]+=*$/.test(value)));
 }
 
+// Validates a pending operations proposal and calculates the inventory and record changes for administrator approval.
 function applyApprovedRequest(request) {
     const { type, payload } = request;
     const { entry, before } = payload;
@@ -182,6 +195,7 @@ function applyApprovedRequest(request) {
     return { products: nextProducts, records: nextRecords };
 }
 
+// Revalidates sale prices, stock and requested quantities before calculating the approved POS transaction.
 function applySaleRequest(request) {
     const { lines, discountType, discount, total, customer } = request.payload;
     if (!Array.isArray(lines) || !lines.length || !validMoney(discount) || !validMoney(total) || !requestText(customer, true)) {
@@ -222,6 +236,7 @@ function applySaleRequest(request) {
     };
 }
 
+// Builds the staff proposal preview shown to the person reviewing a request.
 function requestDetails(request, card) {
     const payload = request.payload;
     if (!payload) return;
@@ -283,6 +298,7 @@ function requestDetails(request, card) {
     }
 }
 
+// Derives a status key and pending list for dashboard approval counters and refresh detection.
 function requestSummary(requests) {
     const pending = requests.filter(request => request.status === 'Pending');
     return {
@@ -292,6 +308,7 @@ function requestSummary(requests) {
     };
 }
 
+// Refreshes the administrator’s approval badge and dashboard preview when request statuses change.
 function updateRequestSummary(summary) {
     if (displayedSummaryKey === summary.key) return;
     displayedSummaryKey = summary.key;
@@ -313,6 +330,7 @@ function updateRequestSummary(summary) {
     }));
 }
 
+// Displays request cards in review order and wires up administrator decisions.
 function renderRequests() {
     renderedRequestKey = requestSummary(shopRequests).key;
     const list = retail('#request-list');
@@ -362,11 +380,13 @@ function renderRequests() {
     }
 }
 
+// Checks whether an action is underway or a note is being edited before background updates replace the cards.
 function reviewingRequest() {
     return decisionInFlight || [...retail('#request-list').querySelectorAll('input')].some(input =>
         input === document.activeElement || input.value.length > 0);
 }
 
+// Reloads the request list while protecting decisions and unsaved notes from background redraws.
 async function refreshRequests(automatic = false) {
     const button = retail('#refresh-requests');
     if (button.disabled || decisionInFlight || (automatic && reviewingRequest())) return;
@@ -385,6 +405,7 @@ async function refreshRequests(automatic = false) {
     }
 }
 
+// Polls revisions and request counts, refreshing the current view only when shared data has changed.
 async function checkRequestStatus() {
     if (document.hidden || statusLoading || decisionInFlight) return;
     statusLoading = true;
@@ -421,6 +442,7 @@ async function checkRequestStatus() {
     }
 }
 
+// Poll the lightweight status endpoint to refresh approvals, stock and bookings as other users save changes.
 window.setInterval(checkRequestStatus, 5000);
 document.addEventListener('visibilitychange', checkRequestStatus);
 retail('#refresh-requests').addEventListener('click', () => refreshRequests());

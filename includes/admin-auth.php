@@ -1,4 +1,5 @@
 <?php
+// Session security, password verification, first-time administrator setup and the authenticated POST router for every dashboard.
 declare(strict_types=1);
 
 require_once __DIR__ . '/staff-auth.php';
@@ -8,9 +9,11 @@ require_once __DIR__ . '/booking-workflow.php';
 require_once __DIR__ . '/database.php';
 require_once __DIR__ . '/super-admin.php';
 
+// Local credential and shop files use a PHP guard header before the serialized payload.
 const ADMIN_FILE = __DIR__ . '/../admin.credentials.php';
 const ADMIN_FILE_HEADER = "<?php http_response_code(404); exit; __halt_compiler();\n";
 
+// Reads and validates one protected credential record. The returned hash is used only for verification.
 function readAdmin($file): ?array
 {
     rewind($file);
@@ -28,6 +31,7 @@ function readAdmin($file): ?array
     return $admin;
 }
 
+// Configures the session cookie, starts the session, and creates a CSRF token for requests that change state.
 function startAdminSession(): void
 {
     $path = str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'] ?? '/index.php'));
@@ -47,11 +51,13 @@ function startAdminSession(): void
     $_SESSION['csrf'] ??= bin2hex(random_bytes(32));
 }
 
+// Checks whether setup has already created the shop administrator account.
 function adminIsConfigured(): bool
 {
     return adminCredentials() !== null;
 }
 
+// Uses the MySQL admin state when configured, with the local credential file as its initial source.
 function adminCredentials(): ?array
 {
     $database = remsDatabase();
@@ -61,6 +67,7 @@ function adminCredentials(): ?array
     return fileAdminCredentials();
 }
 
+// Reads the local administrator credentials under a shared file lock.
 function fileAdminCredentials(): ?array
 {
     if (!is_file(ADMIN_FILE)) {
@@ -80,6 +87,7 @@ function fileAdminCredentials(): ?array
     }
 }
 
+// Creates the first administrator with a password hash and prevents concurrent setup from replacing it.
 function createAdmin(string $username, string $password): bool
 {
     $database = remsDatabase();
@@ -116,6 +124,7 @@ function createAdmin(string $username, string $password): bool
     }
 }
 
+// Checks the supplied username and password against the stored administrator credentials.
 function verifyAdmin(string $username, string $password): ?string
 {
     $admin = adminCredentials();
@@ -125,6 +134,7 @@ function verifyAdmin(string $username, string $password): ?string
     return $admin['username'];
 }
 
+// Sends a JSON response and stops execution so a failed request cannot continue into a later write.
 function authResponse(int $status, string $message = '', array $data = []): never
 {
     http_response_code($status);
@@ -133,6 +143,7 @@ function authResponse(int $status, string $message = '', array $data = []): neve
     exit;
 }
 
+// Checks the username and password against the rules shared by account creation forms.
 function validateNewCredentials(string $username, string $password): void
 {
     if (!preg_match('/\A[A-Za-z0-9._-]{3,32}\z/', $username)) {
@@ -146,6 +157,7 @@ function validateNewCredentials(string $username, string $password): void
     }
 }
 
+// Records sign-in activity without placing the submitted password in the audit log.
 function auditAuthentication(array $account, string $activity, string $status = 'Success'): void
 {
     try {
@@ -158,8 +170,10 @@ function auditAuthentication(array $account, string $activity, string $status = 
     }
 }
 
+// Validates the CSRF token, applies maintenance restrictions, and routes a POST to the appropriate role-checked handler.
 function handleAdminRequest(): void
 {
+    // The action field identifies an endpoint. The CSRF token must match the one in the current session.
     $action = $_POST['action'] ?? '';
     $csrf = $_POST['csrf'] ?? '';
     if (!is_string($csrf) || !hash_equals($_SESSION['csrf'], $csrf)) {

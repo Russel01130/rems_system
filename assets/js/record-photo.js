@@ -1,3 +1,6 @@
+/* Shared image preparation for inventory and pet registration. Resizing before upload keeps encoded images small enough for JSON storage. */
+
+// Decodes a supported image, bounds it to 480 pixels per edge and encodes a compact photo for storage.
 async function prepareRecordPhoto(file) {
     if (!['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(file.type) || file.size > 10 * 1024 * 1024) {
         throw new Error('Choose a JPG, PNG, WebP, or GIF up to 10 MB.');

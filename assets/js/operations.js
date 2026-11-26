@@ -1,4 +1,6 @@
-﻿const operationKey = 'rems-demo-operations';
+﻿/* Dashboard summaries, the staff appointment views and sales reports. It reads shared shop records, manages filters and renders report charts. */
+
+const operationKey = 'rems-demo-operations';
 const shopKey = 'rems-demo-shop';
 const scheduleName = 'Grooming & Pet Hotel';
 const staffName = 'User Management';
@@ -6,6 +8,7 @@ const serviceTypes = ['Grooming', 'Pet Hotel Check-in'];
 const bookingStatuses = ['Scheduled', 'Completed', 'Cancelled'];
 const bookingFilterStatuses = ['Pending', 'Scheduled', 'Checked in', 'Completed', 'Rejected', 'Cancelled', 'Cancelled - No-show', 'Request expired'];
 const staffRoles = ['Administrator', 'Manager', 'Staff'];
+// The operation configuration lists each page’s columns, filters and form fields.
 const sections = {
     Pets: {
         title: 'Pets',
@@ -87,15 +90,18 @@ const pesos = value => new Intl.NumberFormat('en-PH', { style: 'currency', curre
 const dateFormat = new Intl.DateTimeFormat('en-PH', { dateStyle: 'medium' });
 const localDate = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Manila' });
 
+// Hands a new product and record snapshot to the dashboard’s revision-checked save request.
 async function storeShop(nextProducts, nextRecords) {
     await saveSharedShop(nextProducts, nextRecords);
 }
 
+// Updates one named record group while retaining the other shop records.
 function storeRecords(name, entries) {
     return storeShop(products, { ...records, [name]: entries });
 }
 
 // Work with Manila calendar dates. UTC arithmetic keeps date-only values stable.
+// Returns the first Manila calendar date for the chosen period. Weekly reporting starts on Monday.
 function salesPeriodStart(period, today) {
     if (period === 'year') return today.slice(0, 4) + '-01-01';
     if (period === 'month') return today.slice(0, 7) + '-01';
@@ -105,10 +111,12 @@ function salesPeriodStart(period, today) {
     return monday.toISOString().slice(0, 10);
 }
 
+// Adds amounts in integer cents to avoid accumulating floating-point currency errors.
 function salesRevenue(entries) {
     return entries.reduce((sum, entry) => sum + Math.round(Number(entry[4]) * 100), 0) / 100;
 }
 
+// Tests a sale date against optional start and end dates, including both boundaries.
 function saleInRange(entry, from, to) {
     return (!from || entry[2] >= from) && (!to || entry[2] <= to);
 }
@@ -117,6 +125,7 @@ const dashboardSalesPeriod = document.querySelector('#dashboard-sales-period');
 const dashboardSalesProduct = document.querySelector('#dashboard-sales-product');
 const dashboardSalesTotal = document.querySelector('#dashboard-sales-total');
 
+// Updates the overview for the selected date range and product or service, showing revenue or booking count as appropriate.
 function renderDashboardSales(today) {
     if (!dashboardSalesPeriod) return;
     const product = renderSalesPicker(dashboardSalesProduct);
@@ -130,6 +139,7 @@ function renderDashboardSales(today) {
     document.querySelector('#dashboard-sales-product-note').hidden = !product || Boolean(service);
 }
 
+// Calculates days to expiry from date-only values and returns products due within 30 days.
 function nearExpiryProducts(inventory, today) {
     const dayMs = 86400000;
     const start = Date.parse(today + 'T00:00:00Z');
@@ -139,6 +149,7 @@ function nearExpiryProducts(inventory, today) {
     }).filter(({ days }) => days >= 0 && days <= 30).sort((a, b) => a.days - b.days);
 }
 
+// Displays expiry dates and urgency indicators for the matching inventory records.
 function renderNearExpiryRows(rows, entries) {
     rows.replaceChildren();
     if (!entries.length) {
@@ -166,6 +177,7 @@ document.querySelector('#view-near-expiry')?.addEventListener('click', () => {
     document.querySelector('#near-expiry-dialog').showModal();
 });
 
+// Refreshes the overview metrics, approval context, inventory warnings and upcoming services from the current shop state.
 function refreshDashboard() {
     const dashboard = document.querySelector('#dashboard');
     const low = products.filter(isLowStock).sort((a, b) => a[3] - b[3]);
@@ -257,10 +269,12 @@ const initialValue = field => field.initial?.() ?? (field.placeholder ? '' : fie
 const formatDay = date => dateFormat.format(new Date(date + 'T12:00'));
 const petOwner = name => records.Pets.find(([pet]) => pet === name)?.[1] || '';
 
+// Reads a record status and supplies a default for older rows with no explicit status.
 function operationStatus(entry) {
     return entry[activeOperation === scheduleName ? 4 : 3] || (activeOperation === scheduleName ? 'Scheduled' : 'Active');
 }
 
+// Extracts exact product labels from quantity-prefixed receipt descriptions used in older and current sales rows.
 function saleProductNames(entry) {
     return String(entry[3] ?? '').split(/,\s+(?=\d+\s+×\s+)/)
         .filter(line => /^\d+\s+×\s+/.test(line))
@@ -268,14 +282,17 @@ function saleProductNames(entry) {
         .filter(Boolean);
 }
 
+// Checks whether a transaction includes the selected exact product label instead of relying on a partial search match.
 function saleMatchesProduct(entry, product) {
     return !product || saleProductNames(entry).some(name => name.toLowerCase() === product);
 }
 
+// Interprets a service filter choice separately from an inventory product label.
 function selectedReportService(value) {
     return serviceTypes.find(service => value === 'service:' + service);
 }
 
+// Returns matching product transactions or maps appointment rows into the service report’s display columns.
 function reportEntries(selection) {
     const service = selectedReportService(selection);
     if (!service) return records.Reports.filter(entry => saleMatchesProduct(entry, selection));
@@ -285,6 +302,7 @@ function reportEntries(selection) {
 
 const bookingReportColumns = ['Reference', 'Pet', 'Appointment date', 'Time', 'Status'];
 
+// Builds the expandable Product list from current inventory and historical sales and updates the visible selection.
 function renderSalesPicker(input) {
     const picker = input.closest('details');
     const items = picker.querySelector('.sales-picker-items');
@@ -310,6 +328,7 @@ function renderSalesPicker(input) {
     return input.value;
 }
 
+// Handles product or service choice, keyboard dismissal and clicks outside the nested picker.
 function bindSalesPicker(input, onChange) {
     const picker = input.closest('details');
     const summary = picker.querySelector('summary');
@@ -336,6 +355,7 @@ function bindSalesPicker(input, onChange) {
     });
 }
 
+// Applies search, date and status filters while keeping original record indices for row actions.
 function filteredOperations() {
     const query = operationSearch.value.trim().toLowerCase();
     const entries = activeOperation === 'Reports' ? reportEntries(reportProduct.value) : records[activeOperation];
@@ -357,6 +377,7 @@ function filteredOperations() {
     });
 }
 
+// Updates the operation’s filter choices using species, booking statuses or staff roles as appropriate.
 function renderOperationFilter() {
     const previous = operationFilter.value;
     const species = [...new Map(records.Pets.map(entry => [entry[2].toLowerCase(), entry[2]])).values()].sort();
@@ -366,6 +387,7 @@ function renderOperationFilter() {
     operationFilter.value = options.includes(previous) ? previous : '';
 }
 
+// Calculates the metrics for the active operation and uses booking counts for service reports.
 function renderOperationStats(matches) {
     const all = admin.dataset.page === 'Booking' ? records[activeOperation].filter(entry => entry[7]) : records[activeOperation];
     const today = localDate();
@@ -396,6 +418,7 @@ function renderOperationStats(matches) {
     }));
 }
 
+// Creates role-aware actions for each row, including approval, cancellation and checkout for staff bookings.
 function operationActions(index) {
     const actions = retailNode('div', 'operation-actions');
     const booking = activeOperation === scheduleName ? records[scheduleName][index] : null;
@@ -422,6 +445,7 @@ function operationActions(index) {
 }
 
 let bookingUpdating = false;
+// Saves a staff appointment action, reports any conflict and refreshes the booking and schedule views.
 async function updateBooking(id, status) {
     if (bookingUpdating) return;
     if (status === 'Cancelled' && !window.confirm('Cancel this appointment?')) return;
@@ -443,6 +467,7 @@ async function updateBooking(id, status) {
     }
 }
 
+// Displays the pet roster with its photo or fallback icon, owner and permitted row actions.
 function renderPetCards(entries) {
     const cards = retail('#operations-cards');
     cards.replaceChildren();
@@ -462,6 +487,7 @@ function renderPetCards(entries) {
     }
 }
 
+// Renders the appropriate record or report columns and attaches receipt downloads where available.
 function renderOperationTable(entries, config) {
     const head = retail('#operations-head');
     const rows = retail('#operations-rows');
@@ -503,6 +529,7 @@ function renderOperationTable(entries, config) {
     }
 }
 
+// Trend grouping is separate from the date range. Yearly grouping uses calendar years.
 let salesGroup = 'day';
 const salesChartLabels = { day: 'days', week: 'weeks', month: 'months', year: 'years' };
 const salesAxisDate = new Intl.DateTimeFormat('en-PH', { month: 'short', day: 'numeric', timeZone: 'UTC' });
@@ -510,10 +537,12 @@ const salesAxisMonth = new Intl.DateTimeFormat('en-PH', { month: 'short', year: 
 const salesAxisMoney = new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP', notation: 'compact', maximumFractionDigits: 1 });
 const utcSaleDate = date => new Date(date + 'T00:00:00Z');
 
+// Groups a sale or appointment date under the beginning of its day, week, month or year.
 function trendBucket(date, group) {
     return group === 'day' ? date : salesPeriodStart(group, date);
 }
 
+// Moves between chart periods using calendar arithmetic to handle variable-length months and years.
 function shiftTrendBucket(date, group, count) {
     const shifted = utcSaleDate(date);
     if (group === 'year') shifted.setUTCFullYear(shifted.getUTCFullYear() + count);
@@ -522,6 +551,7 @@ function shiftTrendBucket(date, group, count) {
     return shifted.toISOString().slice(0, 10);
 }
 
+// Aggregates matching rows per chart period and fills missing periods with zero inside the visible range.
 function salesTrendSeries(entries, group, from, to, countBookings = false) {
     const count = group === 'day' ? 14 : 12;
     const lastDate = to || entries.reduce((latest, entry) => entry[2] > latest ? entry[2] : latest, '') || localDate();
@@ -539,6 +569,7 @@ function salesTrendSeries(entries, group, from, to, countBookings = false) {
         .map(date => ({ date, amount: (totals.get(date) ?? 0) / 100 }));
 }
 
+// Creates an SVG chart element in the correct namespace with optional text and attributes.
 function chartElement(tag, attributes, value) {
     const element = document.createElementNS('http://www.w3.org/2000/svg', tag);
     for (const [name, setting] of Object.entries(attributes)) element.setAttribute(name, setting);
@@ -546,6 +577,7 @@ function chartElement(tag, attributes, value) {
     return element;
 }
 
+// Draws the chart axes, line and accessible points using peso amounts for sales or counts for appointments.
 function renderSalesTrend(matches) {
     const entries = matches.map(({ entry }) => entry);
     const bookingReport = Boolean(selectedReportService(reportProduct.value));
@@ -608,6 +640,7 @@ document.querySelectorAll('[data-sales-group]').forEach(button => {
     });
 });
 
+// Refreshes the operation view from filtered results, including pagination, metrics, exports and the trend chart.
 function renderOperation() {
     const config = sections[activeOperation];
     if (activeOperation === 'Reports') renderSalesPicker(reportProduct);
@@ -651,6 +684,7 @@ function renderOperation() {
 let petPhoto = '';
 let pendingPetPhoto;
 
+// Builds the pet photo preview and editing control for the staff record form.
 function petPhotoField(photo, view) {
     const block = retailNode('div', 'operation-wide pet-photo-field');
     petPhoto = photo;
@@ -699,6 +733,7 @@ function petPhotoField(photo, view) {
     return block;
 }
 
+// Fills the shared operation dialog and selects role-appropriate view, edit or appointment attendance controls.
 function openOperation(mode, index = -1) {
     const config = sections[activeOperation];
     const entry = records[activeOperation][index];
@@ -756,6 +791,7 @@ function openOperation(mode, index = -1) {
     operationDialog.showModal();
 }
 
+// Read the configured fields and turn the validated form into a staff proposal or an authorized save.
 operationForm.addEventListener('submit', async event => {
     event.preventDefault();
     const config = sections[activeOperation];
@@ -870,6 +906,7 @@ document.querySelector('#remove-operation').addEventListener('click', async () =
     operationMessage.textContent = sections[activeOperation].noun + ' removed.';
 });
 
+// Downloads filtered product sales or service bookings with the columns shown in the report.
 function exportSales() {
     const bookingReport = Boolean(selectedReportService(reportProduct.value));
     const rows = [bookingReport ? bookingReportColumns : sections.Reports.columns, ...filteredOperations().map(({ entry }) => entry)];
@@ -887,6 +924,7 @@ function exportSales() {
     operationMessage.textContent = bookingReport ? 'Bookings CSV downloaded.' : 'Sales CSV downloaded.';
 }
 
+// Use the same filtered records as CSV and format either amounts or booking statuses for PDF.
 exportSalesPdfButton.addEventListener('click', () => {
     if (activeOperation !== 'Reports' || exportSalesPdfButton.disabled) return;
     const entries = filteredOperations().map(({ entry }) => entry);
@@ -913,6 +951,7 @@ exportSalesPdfButton.addEventListener('click', () => {
     }
 });
 
+// Restores default operation filters and returns to the first result page.
 function resetOperations() {
     operationSearch.value = '';
     operationFilter.value = '';
@@ -929,6 +968,7 @@ operationAction.addEventListener('click', () => {
     else if (activeOperation === 'Pets' && !records.Customers.length) operationMessage.textContent = 'Add an owner on the Customers page before adding a pet.';
     else openOperation('add');
 });
+// Applies a preset date range and corresponding chart grouping before redrawing Reports.
 function applySalesPeriod(period) {
     if (period === 'custom') {
         reportFrom.focus();
@@ -973,6 +1013,7 @@ document.querySelector('#operation-reset').addEventListener('click', () => {
     operationSearch.focus();
 });
 
+// The Booking tab uses the appointment schedule renderer with customer-submitted rows only.
 document.addEventListener('rems:section', event => {
     refreshDashboard();
     if (operations.hidden) return;

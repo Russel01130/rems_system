@@ -1,5 +1,8 @@
+/* Dashboard navigation, inventory forms, barcode generation and profile settings. It runs before the feature modules and supplies shared inventory helpers. */
+
 const admin = document.querySelector('#admin');
 const productDialog = document.querySelector('#product-dialog');
+// Cache inventory form elements that are reused while editing and rendering.
 const productForm = document.querySelector('#product-form');
 const rows = document.querySelector('#product-rows');
 const category = document.querySelector('#category');
@@ -46,6 +49,7 @@ const removePhoto = document.querySelector('#remove-product-photo');
 let previousAdminPage = 'Dashboard';
 const adminHistoryPages = ['Transaction History', 'Audit Logs'];
 
+// Enforces dashboard navigation by role, switches visible panels and dispatches the section event used by feature scripts.
 function showSection(name) {
     if (admin.dataset.role === 'admin' && ['Point of Sale', 'Booking', 'Reservation', 'Pets', 'Grooming & Pet Hotel'].includes(name)) return;
     if (admin.dataset.role === 'staff' && ['Reports', 'User Management', ...adminHistoryPages].includes(name)) return;
@@ -95,6 +99,7 @@ document.querySelectorAll('[data-section]').forEach(button => {
     });
 });
 
+// Adds one table cell using text content and an optional styling class.
 function appendCell(row, value, className = '') {
     const cell = row.insertCell();
     cell.className = className;
@@ -102,33 +107,40 @@ function appendCell(row, value, className = '') {
     return cell;
 }
 
+// Checks a stocked variant against its minimum-stock setting or the default threshold.
 function isLowStock(product) {
     return product[3] > 0 && product[3] <= (product[8]?.minimumStock ?? 5);
 }
 
+// Identifies a duplicate product by case-insensitive name, category and unit.
 function sameProductVariant(product, name, category, unit) {
     return product[0].toLowerCase() === name.toLowerCase() && product[1] === category &&
         (product[8]?.unit ?? '') === unit;
 }
 
+// Formats the product name and unit together for inventory, carts and reports.
 function productLabel(product) {
     return product[8]?.unit ? product[0] + ' · ' + product[8].unit : product[0];
 }
 
+// Returns the product barcode and any item-level barcodes stored on a variant.
 function productBarcodes(product) {
     return [product[7], ...(product[8]?.itemBarcodes ?? [])].filter(Boolean);
 }
 
+// Calculates the barcode’s final check digit from the preceding digits.
 function barcodeCheckDigit(body) {
     const sum = [...body].reduce((total, digit, index) => total + Number(digit) * (index % 2 === 0 ? 1 : 3), 0);
     return String((10 - sum % 10) % 10);
 }
 
+// Checks an item barcode’s length, prefix and checksum before it can be saved.
 function validItemBarcode(barcode) {
     return typeof barcode === 'string' && /^\d{13}$/.test(barcode)
         && barcode[12] === barcodeCheckDigit(barcode.slice(0, 12));
 }
 
+// Finds an unused barcode for a new physical item using the catalog’s existing codes.
 function generateItemBarcode() {
     const used = new Set(products.flatMap(productBarcodes));
     let barcode;
@@ -140,6 +152,7 @@ function generateItemBarcode() {
     return barcode;
 }
 
+// Draws the validated barcode and its readable digits on the canvas for printing or scanning.
 function drawItemBarcode(canvas, barcode) {
     canvas.hidden = !barcode;
     if (!barcode) return;
@@ -163,6 +176,7 @@ function drawItemBarcode(canvas, barcode) {
     }
 }
 
+// Checks that an optional expiry value is a real calendar date in the stored format.
 function validExpiryDate(date) {
     if (date === '') return true;
     if (typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return false;
@@ -170,11 +184,13 @@ function validExpiryDate(date) {
     return Number.isFinite(value.getTime()) && value.toISOString().slice(0, 10) === date;
 }
 
+// Returns the allowed unit choices for the selected product category.
 function unitsForCategory(category) {
     const groups = unitGroupsByCategory.get(category) ?? [...productUnitGroups.keys()];
     return groups.flatMap(group => productUnitGroups.get(group));
 }
 
+// Rebuilds the unit selector for the current category and preserves an existing value when possible.
 function updateProductUnits(selectedUnit, readOnly = false) {
     const units = unitsForCategory(productForm.elements.category.value);
     // Keep a previously saved unit visible when viewing older products.
@@ -185,6 +201,7 @@ function updateProductUnits(selectedUnit, readOnly = false) {
     unitSelect.disabled = readOnly;
 }
 
+// Reads a size’s numeric quantity and normalizes supported measures for proportional pricing.
 function unitMeasurement(unit) {
     const match = /^(\d+(?:\.\d+)?) (mL|L|g|kg)$/.exec(unit);
     if (!match) return null;
@@ -194,6 +211,7 @@ function unitMeasurement(unit) {
     return Number.isSafeInteger(quantity) && quantity > 0 ? { kind, quantity } : null;
 }
 
+// Converts a saved pricing basis to cents for another compatible unit size.
 function priceForUnit(basis, unit) {
     if (!basis || !Number.isSafeInteger(basis.cents) || basis.cents < 0) return null;
     if (unit === basis.unit) return basis.cents;
@@ -205,10 +223,12 @@ function priceForUnit(basis, unit) {
     return rounded <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(rounded) : null;
 }
 
+// Stores the manually entered unit and price as the basis for future unit-size calculations.
 function enteredUnitPrice(unit, amount) {
     return unit && validMoney(amount) ? { unit, cents: Math.round(Number(amount) * 100) } : null;
 }
 
+// Updates the selling price from the selected unit and the existing pricing basis.
 function updatePriceForSelectedUnit() {
     const unit = unitSelect.value;
     if (!unit) return;
@@ -229,6 +249,7 @@ sellingAmount.addEventListener('input', () => {
     unitPriceBasis = enteredUnitPrice(unitSelect.value, sellingAmount.value);
 });
 
+// Applies the inventory search and stock filters before the table is paginated.
 function matchingInventoryProducts() {
     const query = search.value.trim().toLowerCase();
     const lowOnly = filter.getAttribute('aria-pressed') === 'true';
@@ -239,12 +260,14 @@ function matchingInventoryProducts() {
     );
 }
 
+// Assigns a product to the out-of-stock, low-stock or in-stock display state.
 function inventoryStockStatus(product) {
     return product[3] === 0 ? 'out' : isLowStock(product) ? 'low' : 'in';
 }
 
 const stockStatusLabels = { out: 'Out of Stock', low: 'Low Stock', in: 'In Stock' };
 
+// Draws the filtered inventory page, with product mutations offered only to administrators.
 function renderProducts() {
     const matching = matchingInventoryProducts();
     if (inventoryPdfButton) inventoryPdfButton.disabled = !matching.length || shopRevision === null;
@@ -309,6 +332,7 @@ function renderProducts() {
     }
 }
 
+// Builds a printable PDF of the currently selected inventory rows and shows expiry and stock details.
 function downloadInventoryPdf(inventory, date) {
     const pdf = new window.jspdf.jsPDF({ unit: 'pt', format: 'a4' });
     const margin = 40;
@@ -365,11 +389,13 @@ inventoryPdfButton?.addEventListener('click', () => {
     if (matching.length) downloadInventoryPdf(matching.map(({ product }) => product), localDate());
 });
 
+// Resets the inventory to the first page after search or filter changes.
 function resetPage() {
     page = 1;
     renderProducts();
 }
 
+// Confirms the administrator’s delete action and asks the server to validate the new inventory snapshot.
 async function deleteProduct(product, button) {
     const name = productLabel(product);
     if (!window.confirm('Delete ' + name + ' from inventory?')) return;
@@ -398,6 +424,7 @@ filter.addEventListener('click', () => {
     resetPage();
 });
 
+// Loads and locks the appropriate product fields for viewing or fills the edit or add form.
 function openProduct(mode, index = -1) {
     if (isStaff && mode !== 'view') return;
     productIndex = index;
@@ -432,6 +459,7 @@ function openProduct(mode, index = -1) {
     productDialog.showModal();
 }
 
+// Refreshes the form’s product photo preview and conditionally shows its remove button.
 function updatePhotoPreview(readOnly = false) {
     photoPreview.hidden = !productPhoto;
     removePhoto.hidden = readOnly || !productPhoto;
@@ -439,11 +467,13 @@ function updatePhotoPreview(readOnly = false) {
     else photoPreview.removeAttribute('src');
 }
 
+// Accepts a nonnegative amount with at most two decimal places that can be represented safely in cents.
 function validMoney(value) {
     const text = String(value ?? '');
     return /^(?:\d+(?:\.\d{1,2})?|\.\d{1,2})$/.test(text) && Number.isSafeInteger(Math.round(Number(text) * 100));
 }
 
+// Shows a saved product or pet photo and restores its fallback icon if the image cannot be displayed.
 function showRecordPhoto(frame, photo, fallback) {
     frame.textContent = fallback;
     if (!photo) return;
@@ -483,6 +513,7 @@ removePhoto.addEventListener('click', () => {
 });
 
 document.querySelector('#add-product').addEventListener('click', () => openProduct('add'));
+// Build and validate the product snapshot before sending it to the revision-checked save endpoint.
 productForm.addEventListener('submit', async event => {
     event.preventDefault();
     if (isStaff) return;
@@ -558,6 +589,7 @@ document.querySelector('#add-item').addEventListener('click', () => {
     itemDialog.showModal();
 });
 
+// Attach the generated item barcode to the selected inventory variant.
 itemForm.addEventListener('submit', async event => {
     event.preventDefault();
     if (isStaff || itemSave.disabled) return;
@@ -585,6 +617,7 @@ itemForm.addEventListener('submit', async event => {
     itemDialog.close();
     inventoryMessage.textContent = 'Item added for ' + productLabel(before) + '. Barcode ' + barcode + '.';
 });
+// Profile settings are browser preferences and are applied separately from the shop state.
 const profileMenu = document.querySelector('#profile-menu');
 const profileTrigger = profileMenu.querySelector('summary');
 const settingsPage = document.querySelector('#profile-settings');
@@ -600,6 +633,7 @@ try {
     // Appearance can still be changed for the current page.
 }
 
+// Updates the page theme using the chosen setting or the operating system preference.
 function applyAppearance() {
     const dark = appearance === 'dark' || (appearance === 'system' && deviceTheme.matches);
     document.documentElement.dataset.theme = dark ? 'dark' : 'light';
@@ -608,6 +642,7 @@ function applyAppearance() {
     appearanceChoices.forEach(input => { input.checked = input.value === appearance; });
 }
 
+// Stores a theme preference in the browser and applies it to the current workspace.
 function chooseAppearance(theme) {
     appearance = theme;
     try {
@@ -643,6 +678,7 @@ const profileSaveStatus = document.querySelector('#profile-save-status');
 const displayNameKey = admin.dataset.role === 'staff' ? 'rems-display-name:' + admin.dataset.username : 'rems-display-name';
 const defaultDisplayName = profileName.textContent;
 
+// Updates the profile label, menu accessibility label and settings form together.
 function showDisplayName(name) {
     profileName.textContent = name;
     profileTrigger.setAttribute('aria-label', name + ' profile menu');

@@ -1,8 +1,10 @@
 <?php
+// Staff credentials and session role resolution. Local credential entries are append-only until MySQL storage is configured.
 declare(strict_types=1);
 
 const STAFF_FILE = __DIR__ . '/../staff.credentials.php';
 
+// Replays the staff credential file in order so later enable or disable entries override the original account status.
 function readStaffAccounts($file): array
 {
     rewind($file);
@@ -27,6 +29,7 @@ function readStaffAccounts($file): array
     return $accounts;
 }
 
+// Loads staff records from MySQL or the protected local file using the active storage configuration.
 function staffAccounts(): array
 {
     $database = remsDatabase();
@@ -36,6 +39,7 @@ function staffAccounts(): array
     return fileStaffAccounts();
 }
 
+// Reads local staff accounts under a shared lock and returns an empty list before setup.
 function fileStaffAccounts(): array
 {
     if (!is_file(STAFF_FILE)) {
@@ -55,6 +59,7 @@ function fileStaffAccounts(): array
     }
 }
 
+// Identifies the signed-in role and invalidates staff sessions whose account has since been disabled or changed.
 function currentAccount(): ?array
 {
     if (isset($_SESSION['super_admin'])) {
@@ -78,6 +83,7 @@ function currentAccount(): ?array
     return null;
 }
 
+// Sorts staff accounts and returns only the username and active state for display.
 function staffAccountList(array $accounts): array
 {
     ksort($accounts);
@@ -87,6 +93,7 @@ function staffAccountList(array $accounts): array
     ));
 }
 
+// Allows administrators to list, create or enable and disable staff accounts and audits successful changes.
 function handleStaffAccountRequest(string $action): never
 {
     $account = currentAccount();
@@ -152,6 +159,7 @@ function handleStaffAccountRequest(string $action): never
     ]);
 }
 
+// Locks the staff file during an append and rolls back a partial write so older account entries remain readable.
 function changeStaffFile(bool $create, callable $change): array
 {
     if (!$create && !is_file(STAFF_FILE)) {

@@ -1,4 +1,5 @@
 <?php
+// Customer portal template for shopping, appointment booking, pet registration, order history and the notification inbox.
 if (empty($isCustomer)) {
     http_response_code(404);
     exit;
@@ -14,6 +15,7 @@ if (empty($isCustomer)) {
             <button type="button" data-portal-page="history">My Activity</button>
         </nav>
         <div class="portal-header-actions">
+            <!-- The inbox uses a native disclosure so the bell is usable with a keyboard. -->
             <details id="portal-notifications" class="portal-notifications">
                 <summary class="filter" aria-label="Appointment notifications">
                     <span aria-hidden="true">&#128276;</span>
@@ -38,6 +40,7 @@ if (empty($isCustomer)) {
     <main class="portal-content">
         <p class="portal-status" id="portal-status" role="status"></p>
         <p class="maintenance-notice" id="portal-booking-maintenance" role="status" hidden>Appointments are under maintenance. Please try again later.</p>
+        <!-- The catalog and pickup cart are rendered from customer_read data. -->
         <section id="portal-shop" aria-labelledby="portal-shop-title">
             <div class="portal-heading">
                 <div><h1 id="portal-shop-title">Shop Pet Supplies</h1><p>Reserve products online and pay when you pick them up.</p></div>
@@ -57,6 +60,7 @@ if (empty($isCustomer)) {
                 </aside>
             </div>
         </section>
+        <!-- Customers choose an available time and a pet from their own saved profiles. -->
         <section id="portal-booking" aria-labelledby="portal-booking-title" hidden>
             <div class="portal-heading"><div><h1 id="portal-booking-title">Book a Visit</h1><p>Choose a grooming appointment or pet hotel check-in. Up to five appointments are available per day.</p></div></div>
             <div class="portal-booking-grid">
@@ -83,6 +87,7 @@ if (empty($isCustomer)) {
                 </article>
             </div>
         </section>
+        <!-- Registration collects mandatory pet details and supplies them to the owner’s profile and booking choices. -->
         <section id="portal-pet-management" aria-labelledby="portal-pet-title" hidden>
             <div class="portal-heading"><h1 id="portal-pet-title">Pet Management</h1></div>
             <div class="portal-booking-grid">
@@ -103,6 +108,7 @@ if (empty($isCustomer)) {
                 <article class="portal-card"><h2>My Pets</h2><div id="portal-registered-pets"></div></article>
             </div>
         </section>
+        <!-- Activity shows order receipts and appointment decisions returned for this account. -->
         <section id="portal-history" aria-labelledby="portal-history-title" hidden>
             <div class="portal-heading"><div><h1 id="portal-history-title">My Activity</h1><p>Check your pickup orders and booked visits.</p></div><button type="button" class="filter" id="refresh-activity">Refresh</button></div>
             <div class="portal-booking-grid">
@@ -111,6 +117,7 @@ if (empty($isCustomer)) {
             </div>
         </section>
     </main>
+    <!-- The same receipt text is used for on-screen viewing, PDF output and browser printing. -->
     <dialog class="portal-receipt" id="portal-receipt" aria-labelledby="portal-receipt-title">
         <h2 id="portal-receipt-title">Pickup Order Receipt</h2>
         <pre id="portal-receipt-details"></pre>

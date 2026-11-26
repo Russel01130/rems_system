@@ -1,9 +1,11 @@
+# Local login credentials and operational records contain private data.
 /admin.credentials.php
 /staff.credentials.php
 /super-admin.credentials.php
 /shop-data.php
 /shop-lock.php
 /shop-write-*.php
+# Keep editor metadata and environment-specific database secrets out of Git.
 /.qodo/
 /.env
 /.env.*

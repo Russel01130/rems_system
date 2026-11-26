@@ -1,3 +1,6 @@
+/* Shared catalog grouping and rendering used by Staff POS and the customer shop. Cart actions keep the selected variant’s own ID. */
+
+// Groups variants with the same product name and category while preserving each variant ID, stock and price.
 function groupCatalogVariants(variants, matches, selections) {
     const groups = new Map();
     for (const variant of variants) {
@@ -16,6 +19,7 @@ function groupCatalogVariants(variants, matches, selections) {
     return visible;
 }
 
+// Creates one listing for a group of sizes and sends the chosen variant ID to the caller’s cart action.
 function catalogVariantCard(group, { selections, formatPrice, picture, stockText, canAdd, addVariant }) {
     const card = document.createElement('article');
     card.className = 'catalog-item';
@@ -34,6 +38,7 @@ function catalogVariantCard(group, { selections, formatPrice, picture, stockText
     card.append(image, info);
     info.append(title);
 
+    // Refreshes the displayed variant price, stock, cart availability and accessible add-button label.
     function updateDetails() {
         price.textContent = formatPrice(variant.price);
         stock.textContent = stockText(variant.stock);

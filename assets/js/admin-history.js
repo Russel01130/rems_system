@@ -1,3 +1,5 @@
+/* Administrator transaction and audit views. Local transaction rows and server-paginated audit results share rendering and export helpers. */
+
 const historyPageSize = 15;
 const historyTime = new Intl.DateTimeFormat('en-PH', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Manila' });
 const historyRoles = { admin: 'Administrator', staff: 'Staff', customer: 'Customer', super_admin: 'Super Admin', system: 'System' };
@@ -8,14 +10,17 @@ let transactionPage = 1;
 let auditRequest = 0;
 let auditSearchTimer;
 
+// Reads the currently selected search and filter values from a history form.
 function historyValues(form) {
     return Object.fromEntries([...new FormData(form)].map(([key, value]) => [key, value.trim()]));
 }
 
+// Gets visible table headers so details and export columns follow the page layout.
 function historyColumns(key) {
     return [...retail('#admin-' + key + ' thead tr').cells].map(cell => cell.textContent);
 }
 
+// Renders history rows with text or prepared controls and adds a full-width empty result message.
 function renderHistoryRows(key, entries, emptyMessage) {
     const rows = retail('#' + key + '-history-rows');
     rows.replaceChildren();
@@ -29,6 +34,7 @@ function renderHistoryRows(key, entries, emptyMessage) {
     if (!entries.length) appendCell(rows.insertRow(), emptyMessage).colSpan = historyColumns(key).length;
 }
 
+// Builds pagination controls and describes the displayed result range.
 function renderHistoryPages(key, page, pages, total, from, to, change) {
     const controls = retail('#' + key + '-history-pages');
     controls.replaceChildren();
@@ -50,6 +56,7 @@ function renderHistoryPages(key, page, pages, total, from, to, change) {
     controls.append(next);
 }
 
+// Slices an in-memory result set into one page and renders its rows and controls.
 function renderHistoryList(key, entries, page, row, onPage) {
     const pages = Math.max(1, Math.ceil(entries.length / historyPageSize));
     const current = Math.min(page, pages);
@@ -60,16 +67,19 @@ function renderHistoryList(key, entries, page, row, onPage) {
     return current;
 }
 
+// Creates a status or type badge from a label and its visual category.
 function historyBadge(label, type) {
     return retailNode('span', 'history-badge ' + type, label);
 }
 
+// Maps transaction and audit statuses to the badge colors used in their tables.
 function historyStatus(label) {
     const moods = { Completed: 'success', Success: 'success', Scheduled: 'warning', Pending: 'warning',
         Warning: 'warning', Cancelled: 'critical', Critical: 'critical' };
     return historyBadge(label, moods[label] ?? '');
 }
 
+// Shows one record in the details dialog and wires up its optional PDF download.
 function showHistoryDetails(title, columns, values, filename) {
     retail('#history-details-title').textContent = title;
     const fields = retail('#history-details-fields');
@@ -82,6 +92,7 @@ function showHistoryDetails(title, columns, values, filename) {
     retail('#history-details-dialog').showModal();
 }
 
+// Fills a filter with deduplicated values and keeps the selected value if it remains available.
 function setHistoryChoices(select, values, labels = {}) {
     const selected = select.value;
     select.replaceChildren(select.options[0], ...[...new Set(values.filter(Boolean))].sort()
@@ -89,12 +100,14 @@ function setHistoryChoices(select, values, labels = {}) {
     select.value = values.includes(selected) ? selected : '';
 }
 
+// Updates the figure displayed by each metric card in a history section.
 function setHistoryMetrics(key, values) {
     retail('#admin-' + key).querySelectorAll('.history-metrics strong').forEach((node, index) => {
         node.textContent = values[index];
     });
 }
 
+// Quotes cells, protects spreadsheet formula prefixes and downloads the selected history rows as CSV.
 function csvHistory(filename, columns, rows) {
     const csvCell = value => {
         const text = String(value ?? '');
@@ -110,6 +123,7 @@ function csvHistory(filename, columns, rows) {
     setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+// Normalizes product sales, pickups and appointments into the Transaction History table’s shared row format.
 function transactionHistoryRows() {
     const sales = (records.Reports ?? []).map(([ref, customer, date, items, total]) => {
         const saved = transactionDetails[ref];
@@ -129,11 +143,13 @@ function transactionHistoryRows() {
     return [...sales, ...bookings].sort((a, b) => b.sortTime - a.sortTime);
 }
 
+// Converts a normalized transaction into the same column order used by the table, details and exports.
 function transactionHistoryValues(entry) {
     return [entry.time, entry.ref || null, entry.type, entry.customer, entry.items, entry.quantity,
         entry.total === null ? null : pesos(entry.total), entry.processedBy || null, entry.status];
 }
 
+// Applies search, status, type and Manila-date filters to the normalized transaction records.
 function filteredTransactions(rows) {
     const { query, type, status, range } = historyValues(transactionFilters);
     const today = localDate();
@@ -152,6 +168,7 @@ function filteredTransactions(rows) {
         transactionHistoryValues(entry).some(value => String(value ?? '').toLowerCase().includes(search)));
 }
 
+// Refreshes transaction metrics, filtered rows, receipt actions and export availability together.
 function renderTransactionHistory() {
     const rows = transactionHistoryRows();
     for (const key of ['type', 'status']) setHistoryChoices(transactionFilters.elements[key], rows.map(entry => entry[key]));
@@ -177,11 +194,13 @@ function renderTransactionHistory() {
     }, next => { transactionPage = next; renderTransactionHistory(); });
 }
 
+// Formats the date and role of one audit event for the table, details and CSV output.
 function auditHistoryValues(entry) {
     return [historyTime.format(new Date(entry.timestamp)), entry.account, historyRoles[entry.role] ?? entry.role,
         entry.area, entry.event, entry.activity, entry.status];
 }
 
+// Loads one server-filtered audit page and discards earlier responses if a newer filter request has already started.
 async function loadAuditLog(page = 1) {
     const request = ++auditRequest;
     auditMessage.textContent = 'Loading audit logs…';
@@ -208,6 +227,7 @@ async function loadAuditLog(page = 1) {
     }
 }
 
+// Returns to page one before rerendering Transaction History after a filter changes.
 function applyTransactionFilters() { transactionPage = 1; renderTransactionHistory(); }
 transactionFilters.addEventListener('submit', event => { event.preventDefault(); applyTransactionFilters(); });
 transactionFilters.addEventListener('input', applyTransactionFilters);

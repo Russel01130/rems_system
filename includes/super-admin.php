@@ -1,8 +1,10 @@
 <?php
+// Super Admin authentication and maintenance controls for the whole site and individual modules.
 declare(strict_types=1);
 
 const SUPER_ADMIN_FILE = __DIR__ . '/../super-admin.credentials.php';
 const MAINTENANCE_NOTICE = 'The shop is temporarily closed for system maintenance. Please try again later.';
+// Define the maintenance modules once so the server checks and overview controls use the same keys.
 const MAINTENANCE_MODULES = [
     'system' => ['▦', 'System-wide', 'Pause access for admins, staff, and customers.'],
     'pos' => ['🛒', 'Point of Sale', 'Pause in-store checkout and approval of staff sales.'],
@@ -11,6 +13,7 @@ const MAINTENANCE_MODULES = [
     'pickup' => ['♙', 'Pickup Orders', 'Pause new pickup reservations and order status changes. Customers can still see their receipts.'],
 ];
 
+// Checks the dedicated Super Admin credentials kept in their own local protected file.
 function verifySuperAdmin(string $username, string $password): ?string
 {
     if (!is_file(SUPER_ADMIN_FILE)) return null;
@@ -27,11 +30,13 @@ function verifySuperAdmin(string $username, string $password): ?string
         : null;
 }
 
+// Reads the current maintenance settings from shared shop state.
 function maintenanceStatus(): array
 {
     return withShopData(false, 'maintenanceSettings');
 }
 
+// Normalizes current and older maintenance records into a status entry for each supported module.
 function maintenanceSettings(array $data): array
 {
     $state = $data['maintenance'] ?? [];
@@ -40,11 +45,13 @@ function maintenanceSettings(array $data): array
     ] + ($state['modules'] ?? []) + array_fill_keys(array_keys(MAINTENANCE_MODULES), ['enabled' => false, 'changedAt' => null]);
 }
 
+// Lists the module keys currently on maintenance so the interface can show the appropriate status.
 function pausedModules(array $settings): array
 {
     return array_keys(array_filter($settings, static fn(array $status): bool => $status['enabled']));
 }
 
+// Stops an operation when its module or the entire shop is on maintenance.
 function requireModuleOnline(array $data, string $module): void
 {
     $settings = maintenanceSettings($data);
@@ -54,6 +61,7 @@ function requireModuleOnline(array $data, string $module): void
     }
 }
 
+// Maps staff request types to their maintenance modules before approval or submission.
 function checkRequestMaintenance(array $data, string $type): void
 {
     $module = match ($type) {
@@ -64,6 +72,7 @@ function checkRequestMaintenance(array $data, string $type): void
     requireModuleOnline($data, $module);
 }
 
+// Checks which areas a proposed snapshot changes so paused modules remain protected during saves.
 function checkShopMaintenance(array $data, array $next): void
 {
     requireModuleOnline($data, 'system');
@@ -84,6 +93,7 @@ function checkShopMaintenance(array $data, array $next): void
     }
 }
 
+// Requires a reason, saves the module switch change with its history and audit entry, then responds to the overview.
 function handleMaintenanceChange(): never
 {
     if (!isset($_SESSION['super_admin'])) authResponse(403, 'Only the Super Admin can change maintenance mode.');

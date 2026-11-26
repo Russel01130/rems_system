@@ -1,4 +1,7 @@
-﻿:root{--retail-ink:#312114;--retail-muted:#746454;--retail-line:#e9e3dc;--retail-gold:#ffdfa0;--retail-orange:#d74612;--retail-paper:#fffdf9}
+﻿/* Feature styles loaded after the base stylesheet. It defines POS and dashboard layouts, shared dropdowns, report charts and theme overrides. */
+
+:root{--retail-ink:#312114;--retail-muted:#746454;--retail-line:#e9e3dc;--retail-gold:#ffdfa0;--retail-orange:#d74612;--retail-paper:#fffdf9}
+/* Role dashboards share the sidebar layout but keep each role’s color treatment. */
 #admin{color:var(--retail-ink);grid-template-columns:clamp(190px,17.2vw,264px) minmax(0,1fr);background:#fdfbf8}
 #admin .sidebar{background:#fcfaf6;border-color:var(--retail-line);position:sticky;align-self:start;height:100svh}
 .admin-brand{display:flex;align-items:flex-start;gap:8px;margin:25px 16px 35px 11%;line-height:1.05}
@@ -30,6 +33,7 @@
 .category-tabs{display:flex;flex-wrap:wrap;gap:10px;padding:19px 0 14px;border-bottom:1px solid var(--retail-line);margin-bottom:14px}
 .category-tabs button{padding:10px 13px;font-size:14px;min-height:42px}
 .catalog-products{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:15px}
+/* Catalog cards align the thumbnail, variant selector, stock and add-to-cart action. */
 .catalog-item,.sale-card,.customer-stat,.customer-table{border:1px solid var(--retail-line);background:var(--retail-paper);border-radius:9px}
 .catalog-item{display:flex;flex-direction:column;padding:12px;min-width:0}
 .retail-product-picture{display:grid;place-items:center;overflow:hidden;font-size:42px;background:#fff;border-radius:5px}
@@ -38,6 +42,7 @@
 .catalog-info{position:relative;flex:1;display:grid;align-content:end;gap:9px;padding-top:8px;padding-right:26px}
 .catalog-info h2{margin:0;font-weight:550;font-size:15px;line-height:1.35;min-height:40px}
 .catalog-info strong{font-size:16px}
+/* Style the native dropdown while preserving keyboard selection and a high-contrast fallback. */
 .retail-select-picker{position:relative;display:grid;min-width:0}
 .retail-toolbar>.retail-select-picker{border:0;background:none;padding:0}
 .retail-select-picker>span{position:absolute;top:50%;left:7px;transform:translateY(-50%);padding:3px 6px;border-radius:5px;background:var(--retail-gold);color:var(--retail-ink);font-size:11px;font-weight:650;pointer-events:none}
@@ -68,6 +73,7 @@
 .retail-pages button{min-width:36px;height:36px}
 .retail-pages button:disabled{opacity:.42}
 .retail-pages span{padding-inline:4px}
+/* Arrange the active sale, quantity controls, totals and suspended carts in the checkout sidebar. */
 .sale-card{overflow:hidden;font-size:14px}
 .sale-card>header,.sale-totals>div,.cart-controls{display:flex;align-items:center;justify-content:space-between;gap:8px}
 .sale-card>header,.sale-totals{padding:16px}
@@ -97,6 +103,7 @@
 #saved-sales button{padding:5px 8px}
 #sale-message,.retail-message{font-size:13px;color:#914218;margin:8px 0}
 .retail-empty{grid-column:1/-1;margin:0;padding:24px;color:var(--retail-muted)}
+/* Customer directory styles cover its toolbar, metrics, contact cells and forms. */
 .customer-heading{justify-content:space-between;align-items:flex-start}
 .customer-heading>div:last-child{display:flex;gap:10px;flex-wrap:wrap}
 .customer-heading button{font-size:14px}
@@ -135,6 +142,7 @@
 #sale-receipt-dialog{max-height:calc(100dvh - 24px);overflow:auto}
 #sale-receipt-dialog pre,#sale-receipt-printout pre{font:inherit;white-space:pre-wrap;overflow-wrap:anywhere}
 #sale-receipt-printout{display:none}
+/* Print only the sale receipt and its prepared text content. */
 @media print{
     body:has(#sale-receipt-dialog[open])>:not(#sale-receipt-printout),#sale-receipt-dialog::backdrop{display:none}
     body:has(#sale-receipt-dialog[open])>#sale-receipt-printout{display:block;color:black;background:white}
@@ -323,6 +331,7 @@
     --retail-paper:#29231f;
     --retail-gold:#5b452c;
 }
+/* Theme overrides change surfaces and contrast while retaining the same component layout. */
 [data-theme="dark"] #admin{background:var(--paper)}
 [data-theme="dark"] #admin .sidebar{background:#27201b}
 [data-theme="dark"] .sidebar::after,[data-theme="dark"] .hero::after{opacity:.15}

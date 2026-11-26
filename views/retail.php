@@ -1,4 +1,5 @@
 <?php
+// Staff POS and shared customer-list markup. It includes the checkout and receipt dialogs used by retail.js.
 if (empty($signedIn)) {
     http_response_code(404);
     exit;
@@ -7,6 +8,7 @@ if (empty($signedIn)) {
 <section id="pos" hidden aria-labelledby="pos-title">
     <h1 id="pos-title">Point of Sale</h1>
     <p class="subtitle">Add products to cart and complete the sale. 🐾</p>
+    <!-- The catalog is grouped by product and unit while the cart retains each selected variant ID. -->
     <div class="pos-layout">
         <div class="catalog">
             <div class="retail-toolbar">
@@ -20,6 +22,7 @@ if (empty($signedIn)) {
             <div id="catalog-products" class="catalog-products"></div>
             <footer class="retail-footer"><span id="pos-count"></span><div class="retail-pages" id="pos-pages"></div></footer>
         </div>
+        <!-- Staff edit quantities, apply a discount, request checkout or hold the cart for three hours here. -->
         <aside class="sale-card">
             <header><strong id="sale-title">🛒 Current Sale (0)</strong><button class="link" id="clear-cart">Clear Cart</button></header>
             <div id="cart-lines"></div>
@@ -91,6 +94,7 @@ if (empty($signedIn)) {
         <button class="primary">Import</button>
     </form>
 </dialog>
+<!-- The checkout dialog collects cash information and shows the calculated change. -->
 <dialog id="payment-dialog">
     <button type="button" class="close" aria-label="Close">×</button>
     <h2>Checkout / Payment</h2>

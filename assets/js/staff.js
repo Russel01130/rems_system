@@ -1,10 +1,13 @@
-﻿const staffAccountsPanel = document.querySelector('#staff-accounts');
+﻿/* Shared JavaScript for Admin and Super Admin staff account forms, including account creation and enable or disable actions. */
+
+const staffAccountsPanel = document.querySelector('#staff-accounts');
 const staffAccountListDisplay = document.querySelector('#staff-account-list');
 const staffAccountDialog = document.querySelector('#staff-account-dialog');
 const staffAccountForm = document.querySelector('#staff-account-form');
 const staffAccountMessage = document.querySelector('#staff-account-message');
 const staffAccountError = document.querySelector('#staff-account-error');
 
+// Sends a form-encoded staff account request to the authenticated server endpoint.
 async function staffAccountRequest(payload) {
     const response = await fetch(location.pathname, { method: 'POST', body: payload });
     const result = await response.json();
@@ -12,10 +15,12 @@ async function staffAccountRequest(payload) {
     return result;
 }
 
+// Builds the action and CSRF fields used by staff list and status requests.
 function staffActionData(action) {
     return new URLSearchParams({ action, csrf: staffAccountForm.elements.csrf.value });
 }
 
+// Creates a text-only element for the staff account list.
 function staffAccountElement(tag, className, text = '') {
     const node = document.createElement(tag);
     node.className = className;
@@ -23,6 +28,7 @@ function staffAccountElement(tag, className, text = '') {
     return node;
 }
 
+// Displays staff account statuses and offers an enable or disable action for each entry.
 function renderStaffAccounts(accounts) {
     staffAccountListDisplay.replaceChildren();
     if (!accounts.length) {
@@ -61,6 +67,7 @@ document.querySelector('#open-staff-account').addEventListener('click', () => {
     staffAccountDialog.showModal();
 });
 
+// Submit the account creation form once, then refresh the active and disabled account list.
 staffAccountForm.addEventListener('submit', async event => {
     event.preventDefault();
     const button = staffAccountForm.querySelector('button[type="submit"]');
@@ -81,6 +88,7 @@ staffAccountForm.addEventListener('submit', async event => {
 });
 
 let staffListLoaded = false;
+// Loads the staff list once when its page is first opened and reports failures in the panel.
 async function loadStaffAccounts() {
     if (staffListLoaded) return;
     staffAccountMessage.textContent = 'Loading staff accounts…';

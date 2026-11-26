@@ -1,6 +1,8 @@
 <?php
+// Optional MySQL persistence for the admin, staff and shop state groups. Each row stores one group as JSON and is updated under a transaction.
 declare(strict_types=1);
 
+// Returns a cached PDO connection configured by REMS_DB environment variables. A missing DSN selects file storage.
 function remsDatabase(): ?PDO
 {
     static $database = null;
@@ -15,6 +17,7 @@ function remsDatabase(): ?PDO
     );
 }
 
+// Imports a state group if missing, then locks its row during the callback so concurrent changes cannot overwrite one another.
 function withDatabaseState(PDO $database, string $name, bool $write, callable $import, callable $operation): mixed
 {
     $exists = $database->prepare('SELECT 1 FROM rems_state WHERE name = ?');
@@ -26,6 +29,7 @@ function withDatabaseState(PDO $database, string $name, bool $write, callable $i
         $seed->execute([$name, json_encode($import(), JSON_THROW_ON_ERROR)]);
     }
 
+    // Lock the state row from the first read through commit to serialize concurrent updates.
     $database->beginTransaction();
     try {
         $select = $database->prepare('SELECT payload FROM rems_state WHERE name = ? FOR UPDATE');

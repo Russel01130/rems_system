@@ -1,4 +1,5 @@
 <?php
+// Super Admin directory of administrator and customer identities, with the shared staff account controls.
 if (empty($isSuperAdmin)) {
     http_response_code(404);
     exit;
@@ -22,6 +23,7 @@ try {
     <p><?= $escape($account['username']) ?> · Super Admin</p>
     <?php if (!empty($administrator)): ?><p><?= $escape($administrator['username']) ?> · Administrator</p><?php endif; ?>
 </section>
+<!-- Customer account rows show identity and contact information without exposing account hashes. -->
 <section class="staff-accounts" aria-labelledby="customer-accounts-heading">
     <h2 id="customer-accounts-heading">Customer Accounts</h2>
     <?php if ($customers === null): ?>

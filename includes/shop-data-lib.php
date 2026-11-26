@@ -1,9 +1,15 @@
 <?php
+// Shared shop storage, revision checks, staff requests, POS receipt access and the audit log. The shop state holds inventory, operations records and customer activity.
 declare(strict_types=1);
 
 const SHOP_FILE = __DIR__ . '/../shop-data.php';
 const SHOP_LOCK = __DIR__ . '/../shop-lock.php';
 
+// Inventory rows keep their data in fixed positions for compatibility with older local snapshots.
+// Indices 0–3 hold name, category, selling price and stock. Indices 4–8 hold the icon, photo,
+// stable product ID, barcode and optional details such as unit, pricing basis and expiry date.
+
+// Runs a callback against shared shop state using configured MySQL or the protected PHP storage file.
 function withShopData(bool $write, callable $operation): array
 {
     $database = remsDatabase();
@@ -14,6 +20,7 @@ function withShopData(bool $write, callable $operation): array
     return withShopFile($write, $operation);
 }
 
+// Uses a separate lock file to synchronize readers and writers. Writes replace the state file only after encoding succeeds.
 function withShopFile(bool $write, callable $operation): array
 {
     $lock = fopen(SHOP_LOCK, 'c+b');
@@ -35,6 +42,7 @@ function withShopFile(bool $write, callable $operation): array
         $data += ['customerAccounts' => [], 'customerOrders' => []];
         $result = $operation($data);
         if ($write) {
+            // Write to a sibling file first so a failed write does not truncate the previous shop snapshot.
             $temporary = __DIR__ . '/../shop-write-' . bin2hex(random_bytes(12)) . '.php';
             $contents = ADMIN_FILE_HEADER . json_encode($data, JSON_THROW_ON_ERROR);
             try {
@@ -51,12 +59,14 @@ function withShopFile(bool $write, callable $operation): array
     }
 }
 
+// Returns every staff request for administrators and only the signed-in staff member’s own requests for staff.
 function visibleShopRequests(array $data, bool $admin, string $username): array
 {
     return array_values(array_filter($data['requests'], static fn(array $request): bool =>
         $admin || $request['staff'] === $username));
 }
 
+// Builds the dashboard response and restricts reports, user management and receipt information by role.
 function shopResult(array $data, bool $admin, string $username): array
 {
     $requests = visibleShopRequests($data, $admin, $username);
@@ -72,6 +82,7 @@ function shopResult(array $data, bool $admin, string $username): array
         'pausedModules' => pausedModules(maintenanceSettings($data))];
 }
 
+// Decodes a bounded JSON POST field into an array and returns a validation error for malformed data.
 function shopInput(string $key, int $maxBytes): array
 {
     $value = $_POST[$key] ?? '';
@@ -87,6 +98,7 @@ function shopInput(string $key, int $maxBytes): array
     return $parsed;
 }
 
+// Validates the dashboard’s replacement snapshot before it is accepted as shared shop state.
 function shopSnapshot(array $data): array
 {
     $shop = shopInput('shop', 6_000_000);
@@ -104,6 +116,7 @@ function shopSnapshot(array $data): array
     return $shop;
 }
 
+// Prevents deleting inventory that a pending pickup needs so a later cancellation can restore its stock.
 function validatePendingPickupProducts(array $data, array $products): void
 {
     $removed = array_diff(array_column($data['shop']['products'] ?? [], 6), array_column($products, 6));
@@ -115,6 +128,7 @@ function validatePendingPickupProducts(array $data, array $products): void
     }
 }
 
+// Checks inventory metadata such as stock thresholds, expiry dates, pricing details and duplicate barcodes.
 function validateInventoryDetails(array $products): void
 {
     $barcodes = [];
@@ -156,6 +170,7 @@ function validateInventoryDetails(array $products): void
     }
 }
 
+// Adds an audit entry with the actor, role, module, event description and UTC timestamp.
 function recordShopAudit(array &$data, array $account, string $area, string $activity, string $status = 'Success'): void
 {
     $data['auditLog'][] = [
@@ -164,6 +179,7 @@ function recordShopAudit(array &$data, array $account, string $area, string $act
     ];
 }
 
+// Compares existing and proposed shop records and logs the inventory, sales or operational changes it can identify.
 function auditShopSave(array &$data, array $account, array $next): void
 {
     $previous = $data['shop'];
@@ -195,6 +211,7 @@ function auditShopSave(array &$data, array $account, array $next): void
     }
 }
 
+// Builds Manila-date metrics, filter choices and newest-first audit results. Export mode returns all matching rows.
 function auditLogResult(array $entries, array $filters, int $page): array
 {
     $today = manilaNow();
@@ -253,6 +270,7 @@ function auditLogResult(array $entries, array $filters, int $page): array
         'summary' => $summary, 'facets' => $facets, 'start' => $total ? $start + 1 : 0, 'end' => $end];
 }
 
+// Checks shop permissions and revisions before running dashboard reads, staff submissions, approvals or administrator saves.
 function handleShopRequest(string $action): never
 {
     $account = currentAccount();
@@ -280,6 +298,7 @@ function handleShopRequest(string $action): never
     }
     refreshBookingDeadlines();
     $result = withShopData(!in_array($action, ['shop_read', 'shop_status'], true), static function (array &$data) use ($action, $admin, $account): array {
+        // Send revision and count information cheaply when the request poll does not need a full snapshot.
         if ($action === 'shop_status') {
             $requests = visibleShopRequests($data, $admin, $account['username']);
             $pending = array_values(array_filter($requests, static fn(array $request): bool => $request['status'] === 'Pending'));
@@ -312,6 +331,7 @@ function handleShopRequest(string $action): never
             ];
             recordShopAudit($data, $account, 'Approvals', 'Submitted ' . str_replace('_', ' ', $type) . ' request.');
         } elseif ($action === 'shop_save') {
+            // Only proposed snapshots based on the current revision may replace the shared records.
             if ((string) $data['revision'] !== ($_POST['revision'] ?? null)) {
                 authResponse(409, 'Shop records changed. Refresh and try again.');
             }
@@ -330,6 +350,7 @@ function handleShopRequest(string $action): never
             $data['shop'] = $next;
             $data['revision']++;
         } elseif ($action === 'shop_decide') {
+            // Finalize a pending proposal. Approval and its changes are handled under the same state lock.
             $decision = $_POST['decision'] ?? '';
             $id = $_POST['id'] ?? '';
             $note = $_POST['note'] ?? '';
@@ -362,6 +383,7 @@ function handleShopRequest(string $action): never
     authResponse(200, '', $result);
 }
 
+// Validates the sale reference and returns an attached receipt only for a recorded transaction.
 function downloadStoredSaleReceipt(): never
 {
     $id = $_POST['id'] ?? '';

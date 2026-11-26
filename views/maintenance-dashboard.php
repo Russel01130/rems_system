@@ -1,4 +1,5 @@
 <?php
+// Super Admin layout for the maintenance overview, history, user management and audit log sections.
 if (empty($isSuperAdmin)) {
     http_response_code(404);
     exit;
@@ -13,6 +14,7 @@ $formatChangeTime = static fn(string $date): string =>
 <div id="admin" data-role="super_admin">
     <aside class="sidebar">
         <div class="admin-brand"><span aria-hidden="true">⌂<i>🐾</i></span><div><strong>Rem’s</strong><small>Pet Supplies &amp;<br>Accessories Shop</small></div></div>
+        <!-- A GET parameter identifies the overview, history, account or audit page without changing shop state. -->
         <nav aria-label="Super Admin navigation">
             <form method="get">
                 <?php foreach ($navigation as $key => [$icon, $label]): ?>
@@ -37,6 +39,7 @@ $formatChangeTime = static fn(string $date): string =>
         <h1>Maintenance Overview</h1>
         <p class="subtitle">Enter a reason, then select a module’s maintenance button to switch it on or off. Times are shown in Manila time.</p>
         <p id="system-maintenance-note" class="maintenance-notice" role="status" <?= $maintenanceEnabled ? '' : 'hidden' ?>>System-wide maintenance is on and takes priority over individual module settings.</p>
+        <!-- Each module posts its next state, required reason and CSRF token from the overview card. -->
         <div class="maintenance-list">
             <?php foreach (MAINTENANCE_MODULES as $key => [, $label]): $status = $maintenance[$key]; ?>
             <form class="maintenance-tile" method="post" aria-label="<?= $label ?> maintenance control">
@@ -79,6 +82,7 @@ $formatChangeTime = static fn(string $date): string =>
         $page = is_string($requestedPage) ? max(1, min($pageCount, (int) $requestedPage)) : 1;
         $entries = array_slice(array_reverse($history), ($page - 1) * $pageSize, $pageSize);
         ?>
+        <!-- The history table displays stored reasons and timestamps in Manila time. -->
         <div class="maintenance-history-table">
             <table aria-label="Maintenance changes">
                 <thead><tr><th scope="col">Date and time</th><th scope="col">Module</th><th scope="col">Maintenance</th><th scope="col">Changed by</th><th scope="col">Reason</th></tr></thead>

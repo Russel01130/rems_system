@@ -1,4 +1,6 @@
-﻿const portal = document.querySelector('#customer-portal');
+﻿/* Customer portal controller. It handles catalog variants, pickup checkout, pet registration, appointment requests and the notification inbox. */
+
+const portal = document.querySelector('#customer-portal');
 const getPortal = selector => portal.querySelector(selector);
 const currency = new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP' });
 const portalDate = new Intl.DateTimeFormat('en-PH', { dateStyle: 'medium', timeZone: 'Asia/Manila' });
@@ -12,6 +14,7 @@ const petForm = getPortal('#portal-pet-form');
 const notificationInbox = getPortal('#portal-notifications');
 const markNotificationsRead = getPortal('#portal-notification-read');
 const receiptDialog = getPortal('#portal-receipt');
+// Cart keys are exact inventory variant IDs so two sizes of the same product can be reserved separately.
 const cart = new Map();
 const shopVariantSelections = new Map();
 let data = { products: [], days: [], orders: [], bookings: [], pets: [], ready: false,
@@ -27,6 +30,7 @@ let displayedBookingPet;
 let markingNotifications = false;
 let renderedNotificationList;
 
+// Creates a portal element and sets its optional class and text without interpreting customer input as markup.
 function element(tag, className = '', text) {
     const node = document.createElement(tag);
     node.className = className;
@@ -34,6 +38,7 @@ function element(tag, className = '', text) {
     return node;
 }
 
+// Creates a non-submit portal button and registers its click handler.
 function portalButton(text, action, className = 'filter') {
     const button = element('button', className, text);
     button.type = 'button';
@@ -41,12 +46,14 @@ function portalButton(text, action, className = 'filter') {
     return button;
 }
 
+// Shows feedback in the portal status area and marks errors visually.
 function notice(text, isError = false) {
     const line = getPortal('#portal-status');
     line.classList.toggle('portal-error', isError);
     line.textContent = text;
 }
 
+// Sends the portal action and CSRF token to index.php and turns a failed JSON response into a readable error.
 async function request(action, fields = {}) {
     const body = new FormData();
     body.set('action', action);
@@ -58,6 +65,7 @@ async function request(action, fields = {}) {
     return result;
 }
 
+// Switches the active customer tab, updates its accessibility state and rerenders the portal.
 function showPortalPage(page) {
     activePage = page;
     for (const button of portal.querySelectorAll('[data-portal-page]')) {
@@ -67,6 +75,7 @@ function showPortalPage(page) {
     renderPortal();
 }
 
+// Shows an approved file or inline photo source and falls back to the catalog icon if the image fails.
 function productImage(product) {
     const frame = element('div', 'retail-product-picture', product.icon);
     if (/^(?:assets\/catalog-[1-6]\.jpg|data:image\/(?:jpeg|png|webp);base64,[A-Za-z0-9+/]+=*)$/.test(product.photo)) {
@@ -79,6 +88,7 @@ function productImage(product) {
     return frame;
 }
 
+// Updates the quantity for a specific variant ID, respects its available stock and clears the old checkout token.
 function adjustCart(id, delta) {
     const quantity = (cart.get(id) ?? 0) + delta;
     const product = data.products.find(item => item.id === id);
@@ -89,6 +99,7 @@ function adjustCart(id, delta) {
     renderShop();
 }
 
+// Renders searchable variant groups and recalculates the pickup cart totals and checkout availability.
 function renderShop() {
     const query = getPortal('#portal-search').value.toLowerCase().trim();
     const list = getPortal('#portal-products');
@@ -137,12 +148,14 @@ function renderShop() {
     getPortal('#portal-order').disabled = pickupPaused || saving || !cart.size || invalid || !data.ready;
 }
 
+// Moves the booking calendar by whole months using UTC arithmetic to keep date-only values stable.
 function monthOffset(offset) {
     const start = portalDateObject(month + '-01');
     start.setUTCMonth(start.getUTCMonth() + offset);
     return start.toISOString().slice(0, 7);
 }
 
+// Draws available appointment dates and prevents selecting days without bookable slots.
 function renderCalendar() {
     const calendar = getPortal('#calendar-days');
     calendar.replaceChildren();
@@ -174,6 +187,7 @@ function renderCalendar() {
     }
 }
 
+// Displays the chosen day’s appointment times and keeps the current slot selection visible.
 function renderSlots() {
     const selected = data.days.find(day => day.date === date);
     const area = getPortal('#booking-slots');
@@ -193,12 +207,14 @@ function renderSlots() {
     updateBookingSubmit();
 }
 
+// Enables the appointment request only when a saved pet and an available time are selected.
 function updateBookingSubmit() {
     const selected = data.days.find(day => day.date === date);
     getPortal('#portal-book').disabled = saving || !data.ready || !bookingForm.elements.pet.value ||
         !selected?.slots.some(slot => slot.time === time && slot.available);
 }
 
+// Displays the pickup receipt details and prepares the same text for download and printing.
 function viewOrderReceipt(order) {
     const items = order.items.map(item => {
         const unitPrice = priceCents(item.price);
@@ -228,6 +244,7 @@ getPortal('#portal-receipt-download').addEventListener('click', event => {
 
 getPortal('#portal-receipt-print').addEventListener('click', () => window.print());
 
+// Lists the signed-in customer’s pickup orders and appointment statuses.
 function renderHistory() {
     const orders = getPortal('#portal-orders');
     const appointments = getPortal('#portal-appointments');
@@ -254,6 +271,7 @@ function renderHistory() {
     if (!appointments.children.length) appointments.append(element('p', 'portal-help', 'No appointments yet.'));
 }
 
+// Presents the saved pet photo, species, breed and markings in either Pet Management or the appointment form.
 function registeredPetCard(pet) {
     const card = element('article', 'portal-registered-pet');
     if (/^data:image\/(?:jpeg|png|webp);base64,[A-Za-z0-9+/]+=*$/.test(pet.photo)) {
@@ -271,12 +289,14 @@ function registeredPetCard(pet) {
     return card;
 }
 
+// Displays saved pets for the signed-in customer and an empty state when none exist.
 function renderRegisteredPets() {
     const list = getPortal('#portal-registered-pets');
     list.replaceChildren(...data.pets.map(registeredPetCard));
     if (!data.pets.length) list.append(element('p', 'portal-help', 'No pets registered yet.'));
 }
 
+// Shows the selected pet’s saved details and avoids reannouncing an unchanged card during polling.
 function renderBookingPetDetails() {
     const pet = data.pets.find(item => item.name === bookingForm.elements.pet.value);
     const details = getPortal('#booking-pet-details');
@@ -287,6 +307,7 @@ function renderBookingPetDetails() {
     details.replaceChildren(...(pet ? [registeredPetCard(pet)] : []));
 }
 
+// Fills the appointment dropdown from the customer’s saved pets and keeps a valid selection after refresh.
 function renderBookingPets() {
     const select = bookingForm.elements.pet;
     const names = data.pets.map(pet => pet.name);
@@ -300,6 +321,7 @@ function renderBookingPets() {
     renderBookingPetDetails();
 }
 
+// Stores the latest server response and clears an appointment date or time if it is no longer available.
 function acceptPortal(portalData) {
     data = portalData;
     const firstMonth = data.days[0]?.date.slice(0, 7) ?? '';
@@ -310,6 +332,7 @@ function acceptPortal(portalData) {
     if (!date || !day.slots.some(slot => slot.time === time && slot.available)) time = '';
 }
 
+// Updates the unread badge and inbox rows, skipping unchanged message lists during polling.
 function renderNotifications() {
     const notices = data.bookingNotices ?? [];
     const unread = notices.filter(item => !item.read).length;
@@ -336,6 +359,7 @@ function renderNotifications() {
     if (!notices.length) list.append(element('li', 'portal-help', 'No notifications yet.'));
 }
 
+// Renders the active customer tab and shows maintenance feedback for paused booking or pickup features.
 function renderPortal() {
     renderNotifications();
     const bookingPaused = data.pausedModules.includes('booking');
@@ -354,6 +378,7 @@ function renderPortal() {
     if (activePage === 'pets') renderRegisteredPets();
 }
 
+// Fetches current portal data without overlapping an active refresh or save. Pet photos are requested on relevant tabs.
 async function refreshPortal() {
     if (loading || saving || markingNotifications) return;
     loading = true;
@@ -366,6 +391,7 @@ async function refreshPortal() {
 }
 
 const notificationTime = new Intl.DateTimeFormat('en-PH', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Manila' });
+// Send the currently unread IDs. The server verifies that each ID belongs to this customer.
 markNotificationsRead.addEventListener('click', async () => {
     if (markingNotifications) return;
     const ids = new Set((data.bookingNotices ?? []).filter(item => !item.read).map(item => item.id));
@@ -413,10 +439,12 @@ bookingForm.elements.pet.addEventListener('change', () => {
     updateBookingSubmit();
 });
 
+// Creates an idempotency token so retrying the same pickup reservation does not reserve stock again.
 function freshCheckoutId() {
     return globalThis.crypto?.randomUUID?.() ?? Date.now().toString(36) + '-' + Math.random().toString(36).slice(2);
 }
 
+// Sends a portal write, runs its success handler and refreshes the customer’s data after the server responds.
 async function savePortal(action, fields, onSuccess, successPage = 'history') {
     if (saving) return;
     saving = true;
@@ -446,6 +474,7 @@ getPortal('#portal-order').addEventListener('click', () => {
     });
 });
 
+// Submit the selected pet and slot. The server verifies ownership and availability again.
 bookingForm.addEventListener('submit', event => {
     event.preventDefault();
     if (!date || !time || !bookingForm.elements.pet.value) return;
@@ -455,6 +484,7 @@ bookingForm.addEventListener('submit', event => {
     } }, () => { date = time = ''; bookingForm.reset(); });
 });
 
+// Resize the pet image before submitting it alongside the required profile fields.
 petForm.addEventListener('submit', async event => {
     event.preventDefault();
     const button = petForm.querySelector('button[type="submit"]');
@@ -481,6 +511,7 @@ petForm.addEventListener('submit', async event => {
 
 renderPortal();
 refreshPortal();
+// Refresh customer data only when this tab is visible so notifications and availability stay current.
 setInterval(() => {
     if (!document.hidden) refreshPortal();
 }, 10000);

@@ -1,4 +1,6 @@
-﻿const auth = document.querySelector('#auth');
+﻿/* Public authentication dialog behavior for login, administrator setup and customer registration. */
+
+const auth = document.querySelector('#auth');
 const form = document.querySelector('#auth-form');
 const title = document.querySelector('#auth-title');
 const intro = document.querySelector('#auth-intro');
@@ -10,6 +12,7 @@ const back = document.querySelector('#auth-recovery-back');
 const confirmation = form.elements.confirmation;
 let busy = false;
 
+// Switches the public authentication dialog between sign-in, setup and customer registration modes.
 function openAuth(mode) {
     const signup = mode === 'customer_signup';
     const setup = mode === 'setup';
@@ -54,6 +57,7 @@ back.addEventListener('click', () => openAuth('login'));
 document.querySelector('#customer-auth-toggle').addEventListener('click', () => openAuth(form.elements.action.value === 'login' ? 'customer_signup' : 'login'));
 auth.addEventListener('close', () => form.reset());
 
+// Send the selected authentication action, display server validation errors and reload on success.
 form.addEventListener('submit', async event => {
     event.preventDefault();
     if (busy || submit.disabled || form.hidden) return;

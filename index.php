@@ -1,10 +1,13 @@
 <?php
+// Application entry point. It loads the session and maintenance state, dispatches POST actions, and renders the page for the authenticated role.
+// Load the server-side modules before deciding which page or endpoint this request needs.
 require_once __DIR__ . '/includes/admin-auth.php';
 startAdminSession();
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
     handleAdminRequest();
 }
 try {
+    // Read the session identity and the shared maintenance flags before choosing a role-specific view.
     $account = currentAccount();
     $maintenance = maintenanceStatus();
 } catch (RuntimeException | JsonException $error) {
@@ -33,6 +36,7 @@ if (!$signedIn && !$maintenanceEnabled) {
     }
 }
 $authToken = htmlspecialchars($_SESSION['csrf'], ENT_QUOTES, 'UTF-8');
+// Seed records give the new shop an initial catalog before shared state is initialized.
 $products = [
     ['Dog Shampoo 250ml', 'Grooming', 180, 3, '🧴'],
     ['Aozi Adult 1kg', 'Pet Food', 123, 24, '🍖'],
@@ -45,9 +49,11 @@ $staffPages = ['Point of Sale', 'Booking', 'Reservation', 'Grooming & Pet Hotel'
 $staffHiddenTabs = [...$adminPages, 'Inventory', 'Customers', 'Pets'];
 $navigation = ['▦ Dashboard', '◎ Inventory', '🛒 Point of Sale', '♙ Customers', '♧ Pets', '⌂ Grooming & Pet Hotel',
     '▣ Booking', '▤ Reservation', '≡ Transaction History', '◷ Audit Logs', '▥ Reports', '♙ User Management'];
+// Returns the shared shop logo markup used by public and customer headers.
 function logo() {
     return '<div class="logo" aria-label="Rem’s Pet Supplies and Accessories Shop"><span class="logo-house">⌂</span><div><strong>Rem’s</strong><small><b>&amp;</b> Pet Supplies<br>Accessories Shop</small><em>Quality goodies for your furbabies!</em></div></div>';
 }
+// Renders the nested sales filter. The hidden value is read by operations.js when building a report.
 function salesPicker(string $id): void {
     ?>
     <div class="sales-picker-field">
@@ -73,6 +79,7 @@ function salesPicker(string $id): void {
 ?>
 <!doctype html>
 <html lang="en">
+<!-- The following assets are selected by role and loaded in dependency order. -->
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -134,6 +141,7 @@ function salesPicker(string $id): void {
     </section>
 </main>
 <?php else: ?>
+<!-- Public storefront introduction. Visitors open the sign-in dialog from this hero. -->
 <main class="hero">
     <div class="hero-copy">
         <h1><span>Welcome!</span><strong>Rem’s</strong>Pet Supplies &amp;<br>Accessories Shop</h1>
@@ -148,6 +156,7 @@ function salesPicker(string $id): void {
 <?php endif; ?>
 </div>
 
+<!-- Authentication dialog shared by account setup, sign-in and customer registration. -->
 <dialog id="auth" data-unavailable="<?= $authUnavailable ? 'true' : 'false' ?>" aria-labelledby="auth-title">
     <button type="button" class="close" aria-label="Close">×</button>
     <h2 id="auth-title">Welcome Back!</h2>
@@ -179,6 +188,7 @@ function salesPicker(string $id): void {
 <?php elseif ($isCustomer): ?>
 <?php require __DIR__ . '/views/customer.php'; ?>
 <?php else: ?>
+<!-- The server exposes only the allowed navigation and panels for this signed-in dashboard role. -->
 <div id="admin" data-csrf="<?= $authToken ?>" data-role="<?= $account['role'] ?>" data-username="<?= htmlspecialchars($account['username'], ENT_QUOTES, 'UTF-8') ?>" data-paused-modules="<?= $pausedModules ?>">
     <aside class="sidebar">
         <div class="admin-brand"><span aria-hidden="true">⌂<i>🐾</i></span><div><strong>Rem’s</strong><small>Pet Supplies &amp;<br>Accessories Shop</small></div></div>
@@ -218,6 +228,7 @@ function salesPicker(string $id): void {
                 </div>
             </details>
         </header>
+        <!-- The workspace is initialized with the overview visible. Feature scripts switch panels after navigation. -->
         <section id="dashboard">
             <h1><?= $isAdmin ? 'Dashboard' : 'Staff Dashboard' ?></h1>
             <p class="subtitle"><?= $isAdmin ? 'Welcome back! Here’s an overview for your shop today.' : 'Track stock, serve customers, and check upcoming appointments.' ?></p>
@@ -307,6 +318,7 @@ function salesPicker(string $id): void {
             </article>
         </section>
 
+        <!-- Inventory filters and table. Administrator actions are rendered separately from staff viewing controls. -->
         <section id="inventory" hidden>
             <div class="inventory-heading">
                 <div><h1>Inventory</h1><p class="subtitle"><?= $isAdmin ? 'Manage products and stock levels.' : 'Review products and stock levels.' ?></p></div>
@@ -336,6 +348,7 @@ function salesPicker(string $id): void {
         <?php require __DIR__ . '/views/retail.php'; ?>
         <?php if ($isAdmin) require __DIR__ . '/views/admin-history.php'; ?>
         <?php if (!$isAdmin): ?>
+        <!-- Staff pickup workflow. The customer-admin script populates these rows from the shared reservation data. -->
         <section id="reservation-page" hidden aria-labelledby="reservation-title">
             <div class="operation-heading">
                 <div><h1 id="reservation-title">Reservation</h1><p class="subtitle">Manage product reservations for in-store pickup.</p></div>
@@ -347,6 +360,7 @@ function salesPicker(string $id): void {
             </div>
         </section>
         <?php endif; ?>
+        <!-- Shared operation shell for the schedule, booking queue, sales reports and account directories. -->
         <section id="operations" hidden aria-labelledby="operations-title">
             <div class="operation-heading">
                 <div><h1 id="operations-title"></h1><p class="subtitle" id="operations-intro"></p></div>
@@ -380,6 +394,7 @@ function salesPicker(string $id): void {
             </div>
             <p class="retail-message" id="report-product-note" hidden>Totals include the full value of each sale containing the selected product.</p>
             <p id="operations-message" role="status"></p>
+            <!-- Report chart and grouping controls. Operations JavaScript draws the chart using the filtered data. -->
             <section id="report-trend" hidden aria-labelledby="report-trend-title">
                 <div class="sales-chart-header">
                     <div><h2 id="report-trend-title">Sales trend</h2><p class="subtitle" id="sales-chart-range"></p></div>
@@ -452,6 +467,7 @@ function salesPicker(string $id): void {
 <?php require __DIR__ . '/views/staff-account-dialog.php'; ?>
 <?php endif; ?>
 
+<!-- Shared detail or edit dialog. Its fields and attendance action are built from the active record type. -->
 <dialog id="operation-dialog" aria-labelledby="operation-dialog-title">
     <button type="button" class="close" aria-label="Close">&times;</button>
     <h2 id="operation-dialog-title"></h2>

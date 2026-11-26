@@ -1,4 +1,5 @@
 <?php
+// Administrator Transaction History and Audit Logs templates. JavaScript loads and filters the data, then fills the tables and export controls.
 if (empty($isAdmin)) {
     http_response_code(404);
     exit;
@@ -24,6 +25,7 @@ foreach ($historyPages as $title => [$key, $description, $columns]):
         <div class="stat"><span class="bubble color-<?= $index ?>" aria-hidden="true"><?= $icon ?></span><div><small><?= $label ?></small><strong>—</strong></div></div>
         <?php endforeach; ?>
     </div>
+    <!-- Filter controls are read by admin-history.js and determine which rows appear in the report and exports. -->
     <form class="history-filters" aria-label="<?= $title ?> filters">
         <div class="history-filter-bar">
             <label class="search"><span aria-hidden="true">⌕</span><input name="query" type="search" maxlength="80" placeholder="<?= $key === 'audit' ? 'Search by account, action, or module…' : 'Search by reference, customer, pet, or item…' ?>" aria-label="Search <?= strtolower($title) ?>"></label>
@@ -60,6 +62,7 @@ foreach ($historyPages as $title => [$key, $description, $columns]):
     </div>
 </section>
 <?php endforeach; ?>
+<!-- A single details dialog serves both transaction and audit rows. -->
 <dialog id="history-details-dialog" aria-labelledby="history-details-title">
     <button type="button" class="close" aria-label="Close">×</button>
     <h2 id="history-details-title"></h2>

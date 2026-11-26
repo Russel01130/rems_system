@@ -1,20 +1,26 @@
-﻿const retail = selector => document.querySelector(selector);
+﻿/* Staff POS, local cart drafts and holds, receipts and customer record screens. Shared sales are recorded through the approval workflow. */
+
+const retail = selector => document.querySelector(selector);
+// Creates a DOM element for retail and admin views with optional text and CSS class.
 function retailNode(tag, className, text) {
     const node = document.createElement(tag);
     if (className) node.className = className;
     if (text !== undefined) node.textContent = text;
     return node;
 }
+// Creates a plain action button and registers its handler without submitting a surrounding form.
 function retailButton(text, action, className) {
     const button = retailNode('button', className, text);
     button.type = 'button';
     button.addEventListener('click', action);
     return button;
 }
+// Creates an ID for local drafts or new records using browser randomness when available.
 function newRetailId() {
     return globalThis.crypto?.randomUUID?.() ?? Date.now().toString(36) + '-' + Math.random().toString(36).slice(2);
 }
 
+// Default products retain predictable IDs so catalog thumbnails and legacy carts still resolve.
 const catalogSeed = [
     ['Royal Canin Dog Food 1kg', 'Pet Food', 550, 24, '🦴'],
     ['Whiskas Cat Food 1kg', 'Pet Food', 420, 18, '🐟'],
@@ -57,6 +63,7 @@ const paymentForm = retail('#payment-form');
 const completeSaleButton = paymentForm.querySelector('button[type="submit"]');
 const saleReceiptDialog = retail('#sale-receipt-dialog');
 let paymentSaving = false;
+// Scope local POS drafts and holds by signed-in username on this browser.
 const saleStorageKey = 'rems-pos-drafts:' + admin.dataset.username.toLowerCase();
 let localSales = {};
 try {
@@ -70,6 +77,7 @@ const initialDraft = localSales.draft ?? (admin.dataset.role === 'admin' ? recor
 let cart = new Map(initialDraft?.lines ?? []);
 discountInput.value = validDiscountType(initialDraft?.discountType) ? initialDraft.discountType : '';
 
+// Persists the current POS draft and suspended sales together under the staff account’s browser key.
 function storeLocalSales(draft, saved = savedSales) {
     localStorage.setItem(saleStorageKey, JSON.stringify({ draft, saved }));
     savedSales = saved;
@@ -79,6 +87,7 @@ let catalogPage = 1;
 let catalogLayout = 'grid';
 const posVariantSelections = new Map();
 
+// Draws previous, next and numbered controls for a paginated retail or operations list.
 function retailPages(target, page, total, go) {
     const container = retail(target);
     container.replaceChildren();
@@ -101,6 +110,7 @@ function retailPages(target, page, total, go) {
     container.append(next);
 }
 
+// Builds the catalog thumbnail and falls back to the product icon when a photo is unavailable.
 function productPicture(product) {
     const picture = retailNode('span', 'retail-product-picture', product[4]);
     picture.setAttribute('aria-hidden', 'true');
@@ -108,6 +118,7 @@ function productPicture(product) {
     return picture;
 }
 
+// Groups product sizes in Staff POS, applies search or category filters and paginates the grouped results.
 function renderCatalog() {
     const category = categorySelect.value;
     const query = posSearch.value.trim().toLowerCase();
@@ -143,6 +154,7 @@ function renderCatalog() {
     for (const button of retail('#pos-categories').children) button.setAttribute('aria-pressed', button.dataset.category === category);
 }
 
+// Refreshes the category dropdown and category buttons from the current catalog.
 function renderCategories() {
     const previous = categorySelect.value;
     const categories = ['', 'Pet Food', 'Accessories', 'Grooming', 'Toys', 'Hygiene', 'Others',
@@ -160,12 +172,14 @@ function renderCategories() {
     retail('#pos-categories').replaceChildren(...buttons);
 }
 
+// Returns the catalog to the first page before rendering a new search or category selection.
 function resetCatalog() {
     catalogPage = 1;
     renderCatalog();
 }
 posSearch.addEventListener('input', resetCatalog);
 categorySelect.addEventListener('change', resetCatalog);
+// Enter after a barcode scan adds the exact matching variant instead of the card’s current unit.
 posSearch.addEventListener('keydown', event => {
     if (event.key !== 'Enter') return;
     const product = products.find(item => productBarcodes(item).includes(posSearch.value.trim()));
@@ -184,6 +198,7 @@ document.querySelectorAll('[data-layout]').forEach(button => {
 });
 
 const cents = amount => Math.round(Number(amount) * 100);
+// Resolves cart IDs into inventory records and calculates subtotal, discount and total in cents.
 function currentSale() {
     const lines = [...cart].map(([id, quantity]) => ({ product: products.find(entry => entry[6] === id), quantity }));
     const subtotal = lines.reduce((total, line) => total + cents(line.product?.[2] ?? 0) * line.quantity, 0);
@@ -192,10 +207,12 @@ function currentSale() {
     return { lines, subtotal, discountType, discount, total: subtotal - discount };
 }
 
+// Serializes cart lines and the selected discount for local browser storage.
 function draftSale(lines = [...cart]) {
     return { lines, discountType: discountInput.value };
 }
 
+// Writes the proposed cart to local storage before replacing the in-memory cart.
 function persistDraft(nextCart) {
     try {
         storeLocalSales(draftSale([...nextCart]));
@@ -207,11 +224,13 @@ function persistDraft(nextCart) {
     }
 }
 
+// Applies a relative quantity change and refreshes the sale after the change is saved.
 function changeQuantity(id, change) {
     const quantity = (cart.get(id) ?? 0) + change;
     if (setCartQuantity(id, quantity)) refreshSale();
 }
 
+// Checks a quantity against stock, removes zero-quantity lines and saves the resulting cart.
 function setCartQuantity(id, quantity) {
     if (quantity > (products.find(entry => entry[6] === id)?.[3] ?? 0)) {
         saleMessage.textContent = 'There is insufficient stock for that quantity.';
@@ -224,6 +243,7 @@ function setCartQuantity(id, quantity) {
     return persistDraft(next);
 }
 
+// Updates the line count, currency totals and available cart actions.
 function renderSaleTotals() {
     const { lines, subtotal, discount, total } = currentSale();
     const count = lines.reduce((sum, line) => sum + (line.product ? line.quantity : 0), 0);
@@ -234,6 +254,7 @@ function renderSaleTotals() {
     for (const selector of ['#checkout', '#clear-cart', '#hold-sale']) retail(selector).disabled = !cart.size;
 }
 
+// Redraws editable cart lines, keeps direct quantity input synchronized with stock and updates held sales.
 function refreshSale() {
     renderCatalog();
     const items = retail('#cart-lines');
@@ -262,6 +283,7 @@ function refreshSale() {
         quantityInput.value = String(quantity);
         quantityInput.setAttribute('aria-label', 'Quantity for ' + name);
         const lineTotal = retailNode('strong', '', pesos(cents(price) * quantity / 100));
+        // Only commit a positive whole-number quantity within stock and then update the line in place.
         quantityInput.addEventListener('change', () => {
             const requested = quantityInput.valueAsNumber;
             if (!Number.isSafeInteger(requested) || requested < 1) {
@@ -297,6 +319,7 @@ retail('#clear-cart').addEventListener('click', () => {
     if (updateSaleState({ lines: [], discountType: '' })) saleMessage.textContent = 'Cart cleared.';
 });
 
+// Switches to a new draft and suspended-sale list only after browser storage confirms the write.
 function updateSaleState(draft, saved = savedSales) {
     try {
         storeLocalSales(draft, saved);
@@ -310,6 +333,7 @@ function updateSaleState(draft, saved = savedSales) {
     return true;
 }
 
+// Applies hold expirations, shows deadline notices and renders the valid actions for each saved sale.
 function renderSavedSales() {
     const now = Date.now();
     let changed = false;
@@ -368,6 +392,7 @@ function renderSavedSales() {
     }
 }
 
+// Checks cart contents and discounts, with optional stock enforcement for actions that only save a draft.
 function saleValidation({ lines, discountType }, checkStock = true) {
     if (!lines.length || lines.some(({ product, quantity }) => !product || !Number.isSafeInteger(quantity) || quantity < 1 || (checkStock && product[3] < quantity))) {
         return 'Check that the cart contains valid products and quantities within available stock.';
@@ -376,6 +401,7 @@ function saleValidation({ lines, discountType }, checkStock = true) {
     return '';
 }
 
+// Persists a paused cart. New Held sales receive a three-hour deadline from the current time.
 function suspendSale(kind) {
     if (!cart.size) return;
     const error = saleValidation(currentSale(), false);
@@ -391,6 +417,7 @@ function suspendSale(kind) {
     }
 }
 
+// Blocks expired holds or a nonempty current cart before restoring a saved sale.
 function resumeSale(sale) {
     if (sale.kind === 'Held' && Date.now() >= sale.expiresAt) {
         renderSavedSales();
@@ -405,10 +432,12 @@ function resumeSale(sale) {
         saleMessage.textContent = error ? 'Sale resumed. ' + error : 'Sale resumed.';
     }
 }
+// Check stored holds while the POS is open and prevent a resume after the saved deadline.
 retail('#hold-sale').addEventListener('click', () => suspendSale('Held'));
 setInterval(() => {
     if (savedSales.some(sale => sale.kind === 'Held' && Date.now() >= sale.expiresAt)) renderSavedSales();
 }, 1000);
+// Shows the receipt details after checkout and prepares its PDF filename.
 function openSaleReceipt(id, details) {
     retail('#sale-receipt-details').textContent = details;
     retail('#sale-receipt-print-details').textContent = details;
@@ -421,6 +450,7 @@ retail('#print-sale-receipt').addEventListener('click', event => {
         retail('#sale-receipt-details').textContent, event.currentTarget.dataset.filename);
 });
 
+// Fetches a previously stored sale receipt and offers it as a PDF download.
 async function downloadSaleReceipt(id, button) {
     button.disabled = true;
     try {
@@ -438,6 +468,7 @@ async function downloadSaleReceipt(id, button) {
         button.disabled = false;
     }
 }
+// Validate the current cart and send staff checkout requests to Approvals.
 retail('#checkout').addEventListener('click', async () => {
     if (paymentSaving) return;
     const sale = currentSale();
@@ -478,6 +509,7 @@ paymentForm.elements.cash.addEventListener('input', () => {
     const change = cents(paymentForm.elements.cash.value) - currentSale().total;
     retail('#payment-change').textContent = change >= 0 ? 'Change ' + pesos(change / 100) : '';
 });
+// Validate cash and stock again before building the sale and receipt details.
 paymentForm.addEventListener('submit', async event => {
     event.preventDefault();
     if (isStaff) return;
@@ -548,6 +580,7 @@ let customerPage = 1;
 let customerEditIndex = -1;
 let customerEditEntry;
 
+// Builds the filtered and paginated customer table with role-appropriate actions.
 function renderCustomers() {
     const customers = records.Customers;
     const month = localDate().slice(0, 7);
@@ -608,6 +641,7 @@ customerSearch.addEventListener('input', () => {
     customerPage = 1;
     renderCustomers();
 });
+// Returns to the first customer results page after the search or filters change.
 function applyCustomerFilters() {
     customerPage = 1;
     renderCustomers();
@@ -615,6 +649,7 @@ function applyCustomerFilters() {
 retail('#customer-filter').addEventListener('click', applyCustomerFilters);
 customerStatus.addEventListener('change', applyCustomerFilters);
 
+// Populates the customer form for viewing, registering or requesting an edit.
 function openCustomer(mode, index = -1) {
     if (!isStaff && mode !== 'view') return;
     const entry = records.Customers[index];
@@ -634,6 +669,7 @@ function openCustomer(mode, index = -1) {
     customerDialog.showModal();
 }
 retail('#add-customer').addEventListener('click', () => openCustomer('add'));
+// Checks phone and email formats and detects conflicts with another customer record.
 function customerContactError(phone, email, except = -1) {
     if (phone && (!/^[+0-9 ().-]+$/.test(phone) || !/^\d{7,15}$/.test(phone.replace(/\D/g, '')))) return 'Enter a valid phone number with 7 to 15 digits.';
     if (email && !/^[^\s@]+@[^\s@.]+(?:\.[^\s@.]+)+$/.test(email)) return 'Enter a valid email address.';
@@ -687,6 +723,7 @@ customerForm.addEventListener('submit', async event => {
     customerMessage.textContent = 'Customer saved.';
 });
 
+// Parses CSV rows with quoted values before validating imported customer records.
 function parseCustomerCsv(source) {
     const rows = [];
     let row = [];
@@ -721,6 +758,7 @@ retail('#import-customers').addEventListener('click', () => {
     retail('#import-error').textContent = '';
     importDialog.showModal();
 });
+// Validate every CSV row before sending customer import changes.
 importForm.addEventListener('submit', async event => {
     event.preventDefault();
     const button = importForm.querySelector('button');

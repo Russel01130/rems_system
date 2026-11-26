@@ -1,3 +1,6 @@
+/* Super Admin maintenance switch interactions. Each overview card sends its required reason asynchronously and displays the saved state in place. */
+
+// Bind each module independently so editing a reason on one card does not affect another card.
 document.querySelectorAll('.maintenance-tile').forEach(form => {
     const toggle = form.elements.enabled;
     const reason = form.elements.reason;

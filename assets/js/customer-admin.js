@@ -1,7 +1,10 @@
-﻿const customerManagement = retail('#customer-management');
+﻿/* Role-specific customer management. Admins see customer accounts, and staff process pickup reservations and cancellations. */
+
+const customerManagement = retail('#customer-management');
 const customerManagementMessage = retail(isStaff ? '#reservation-status' : '#customer-management-status');
 let customerManagementBusy = false;
 
+// Renders the customer account list on the Administrator’s User Management page.
 function renderCustomerAccounts(accounts) {
     const accountList = retail('#customer-account-list');
     accountList.replaceChildren();
@@ -15,6 +18,7 @@ function renderCustomerAccounts(accounts) {
     if (!accounts.length) accountList.append(retailNode('p', 'retail-empty', 'No customer accounts yet.'));
 }
 
+// Renders pickup orders and shows completion and cancellation controls for orders awaiting pickup.
 function renderReservations(orders) {
     const orderList = retail('#customer-order-list');
     orderList.replaceChildren();
@@ -37,6 +41,7 @@ function renderReservations(orders) {
     if (!orders.length) orderList.append(retailNode('p', 'retail-empty', 'No pickup orders yet.'));
 }
 
+// Uses the current role to load administrator account information or the staff pickup queue.
 async function refreshCustomerManagement() {
     if (customerManagementBusy) return;
     customerManagementBusy = true;
@@ -53,6 +58,7 @@ async function refreshCustomerManagement() {
     }
 }
 
+// Confirms a pickup action, saves it through the server and refreshes the shared stock and sales state.
 async function updateCustomerOrder(id, status) {
     if (customerManagementBusy) return;
     const message = status === 'Completed' ? 'Confirm that payment was received and this order was picked up.' : 'Cancel this order and return the reserved quantity to stock?';

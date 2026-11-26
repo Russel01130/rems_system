@@ -1,3 +1,6 @@
+/* Shared PDF writer for text-based receipts, transaction details and filtered reports. The jsPDF library supplies the document format. */
+
+// Uses jsPDF to wrap and paginate report or receipt text before saving an A4 document.
 function downloadReceiptPdf(title, details, filename) {
     const { jsPDF } = window.jspdf;
     const pdf = new jsPDF({ unit: 'pt', format: 'a4' });

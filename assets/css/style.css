@@ -1,3 +1,5 @@
+/* Base design tokens and page styles for the public landing page, authentication, maintenance and shared dashboard layout. */
+
 :root{--ink:#643d2a;--rust:#c3502b;--gold:#edbe3d;--cream:#faf0d4;--line:#ddd7d3;--paper:#fdfdfd}
 *{box-sizing:border-box}
 [hidden]{display:none!important}
@@ -8,6 +10,7 @@ button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid 
 button:disabled{cursor:default}
 .primary,.start{border:0;border-radius:5px;background:var(--rust);color:white;padding:6px 17px;font-size:14px}
 .plain,.link,.close{background:none;border:0;padding:0}
+/* Maintenance cards, notices and history tables share the public page’s color tokens. */
 .maintenance-page{width:min(100% - 32px,620px);margin:40px auto}
 .maintenance-card{margin-top:20px;padding:clamp(16px,4vw,28px);border:1px solid var(--line);border-radius:10px;background:var(--paper)}
 .maintenance-card h1{margin:0 0 14px}
@@ -34,6 +37,7 @@ button:disabled{cursor:default}
 .maintenance-history-pages a{color:var(--rust)}
 .link{color:var(--rust);font-weight:700}
 .welcome-header{height:90px;border-bottom:1px solid #e6e2df;padding:0 3.4% 0 4%;display:flex;align-items:center;justify-content:space-between}
+/* The public hero and logo use responsive typography and a decorative wave. */
 .logo{display:flex;align-items:center;width:max-content;color:#bd39ae;line-height:.84;letter-spacing:-.7px}
 .logo strong{font-size:26px;font-weight:900}
 .logo-house{font-size:53px;line-height:.7;color:#bd39ae;font-weight:700;transform:rotate(-9deg)}
@@ -67,6 +71,7 @@ dialog input,dialog select{border:1px solid #cfbfba;border-radius:5px;background
 dialog input::placeholder{color:#9d8174}
 dialog .auth-switch{margin-top:14px;text-align:center;font-size:13px}
 .auth-switch .link{text-decoration:underline}
+/* The dashboard uses a sticky navigation column and a flexible main workspace. */
 #admin{display:grid;grid-template-columns:22.5% minmax(0,1fr);min-height:100svh}
 .sidebar{position:sticky;top:0;min-height:100svh;height:100%;isolation:isolate;display:flex;flex-direction:column;background:#fcfaf2;border-right:1px solid #eee8db}
 .sidebar .logo{margin:25px 0 40px 16%}
@@ -132,6 +137,7 @@ table{border-collapse:collapse;width:100%;text-align:left}
 .schedule div+div{border-top:1px solid #ddd}
 .schedule div>*{padding:5px 12px}
 .schedule div>*+*{border-left:1px solid #ddd}
+/* Inventory controls and table cells retain readable widths on narrow screens. */
 .inventory-heading,.toolbar,.inventory-table footer{display:flex;align-items:center;justify-content:space-between;gap:9px}
 .inventory-heading{flex-wrap:wrap}
 .inventory-actions{display:flex;flex:none;justify-content:flex-end;gap:8px;margin-left:auto}
@@ -189,6 +195,7 @@ table{border-collapse:collapse;width:100%;text-align:left}
 .pagination{display:flex;gap:6px}
 .pagination button{background:white;border:1px solid #ddd;border-radius:3px;min-width:20px;padding:2px 4px;color:var(--ink)}
 .pagination button[aria-current=page]{background:#f5e3ab}
+/* Narrow screens compress the dashboard layout and move navigation into a horizontal row. */
 @media(max-width:820px){.stat{padding:8px;gap:6px}.stat small{white-space:normal}.sidebar nav button{padding-left:6%;font-size:12px}.workspace{padding-right:3%}.dashboard-grid{gap:10px}.stats{gap:8px}}
 @media(max-width:650px){.hero{grid-template-columns:1fr;gap:28px;padding-top:28px}.hero h1{font-size:clamp(29px,7.8vw,44px)}.hero h1 span,.hero h1 strong{font-size:clamp(43px,10.6vw,60px)}.hero p{margin-bottom:24px}.hero-photo{max-width:390px;justify-self:center}.paw-one{left:75%;top:19%}.paw-two{display:none}#admin{grid-template-columns:1fr}.sidebar{position:static;height:auto;min-height:0;display:grid;grid-template-columns:1fr auto}.sidebar .logo{margin:14px}.sidebar nav{grid-row:2;grid-column:1/-1;display:flex;overflow:auto;padding:0 8px 6px}.sidebar nav button{width:auto;padding:4px 8px}.sidebar::after{display:none}.logout{border:0;padding:8px}.admin-header{margin-inline:0}.dashboard-grid,.four{grid-template-columns:repeat(2,minmax(0,1fr))}.dashboard-grid{grid-template-columns:1fr}.schedule div{grid-template-columns:1fr 1fr}.schedule div>*{padding:4px}.toolbar select{width:35%}}
 
