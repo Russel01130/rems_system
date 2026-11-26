@@ -4,6 +4,7 @@ const scheduleName = 'Grooming & Pet Hotel';
 const staffName = 'User Management';
 const serviceTypes = ['Grooming', 'Pet Hotel Check-in'];
 const bookingStatuses = ['Scheduled', 'Completed', 'Cancelled'];
+const bookingFilterStatuses = ['Pending', 'Scheduled', 'Checked in', 'Completed', 'Rejected', 'Cancelled', 'Cancelled - No-show', 'Request expired'];
 const staffRoles = ['Administrator', 'Manager', 'Staff'];
 const sections = {
     Pets: {
@@ -34,14 +35,13 @@ const sections = {
             { label: 'Service', options: () => serviceTypes },
             { label: 'Date', type: 'date', initial: () => localDate() },
             { label: 'Time', type: 'time' },
-            { label: 'Status', options: () => bookingStatuses },
-            { label: 'Appointment notes', type: 'textarea', optional: true }
+            { label: 'Status', options: () => bookingStatuses }
         ]
     },
     Reports: {
         title: 'Sales Reports',
-        description: 'Review completed sales and download transactions for a selected period.',
-        search: 'Search by transaction, customer, or product',
+        description: 'Review product sales and service bookings for a selected period.',
+        search: 'Search by reference, customer, product, or pet',
         columns: ['Transaction', 'Customer', 'Date', 'Sale details', 'Amount'],
         seed: []
     },
@@ -97,6 +97,7 @@ function storeRecords(name, entries) {
 
 // Work with Manila calendar dates. UTC arithmetic keeps date-only values stable.
 function salesPeriodStart(period, today) {
+    if (period === 'year') return today.slice(0, 4) + '-01-01';
     if (period === 'month') return today.slice(0, 7) + '-01';
     if (period !== 'week') return today;
     const monday = new Date(today + 'T00:00:00Z');
@@ -112,14 +113,21 @@ function saleInRange(entry, from, to) {
     return (!from || entry[2] >= from) && (!to || entry[2] <= to);
 }
 
+const dashboardSalesPeriod = document.querySelector('#dashboard-sales-period');
+const dashboardSalesProduct = document.querySelector('#dashboard-sales-product');
+const dashboardSalesTotal = document.querySelector('#dashboard-sales-total');
+
 function renderDashboardSales(today) {
-    document.querySelectorAll('[data-sales-period]').forEach(card => {
-        const start = salesPeriodStart(card.dataset.salesPeriod, today);
-        const entries = records.Reports.filter(entry => saleInRange(entry, start, today));
-        card.querySelector('strong').textContent = pesos(salesRevenue(entries));
-        const dates = start === today ? formatDay(today) : formatDay(start) + ' – ' + formatDay(today);
-        card.querySelector('small').textContent = dates + ' · ' + entries.length + (entries.length === 1 ? ' sale' : ' sales');
-    });
+    if (!dashboardSalesPeriod) return;
+    const product = renderSalesPicker(dashboardSalesProduct);
+    const service = selectedReportService(product);
+    const start = salesPeriodStart(dashboardSalesPeriod.value, today);
+    const entries = reportEntries(product).filter(entry => saleInRange(entry, start, today));
+    dashboardSalesTotal.querySelector('strong').textContent = service ? entries.length : pesos(salesRevenue(entries));
+    const dates = start === today ? formatDay(today) : formatDay(start) + ' – ' + formatDay(today);
+    const count = service ? (entries.length === 1 ? 'booking' : 'bookings') : entries.length + (entries.length === 1 ? ' sale' : ' sales');
+    dashboardSalesTotal.querySelector('small').textContent = dates + ' · ' + count;
+    document.querySelector('#dashboard-sales-product-note').hidden = !product || Boolean(service);
 }
 
 function nearExpiryProducts(inventory, today) {
@@ -233,9 +241,11 @@ const operationDialog = document.querySelector('#operation-dialog');
 const operationSearch = document.querySelector('#operation-search');
 const operationFilter = document.querySelector('#operation-filter');
 const operationAction = document.querySelector('#operation-action');
+const exportSalesPdfButton = document.querySelector('#export-sales-pdf');
 const operationMessage = document.querySelector('#operations-message');
 const operationError = document.querySelector('#operation-error');
 const reportPeriod = document.querySelector('#report-period');
+const reportProduct = document.querySelector('#report-product');
 const reportFrom = document.querySelector('#report-from');
 const reportTo = document.querySelector('#report-to');
 const operationPageSize = 6;
@@ -251,9 +261,86 @@ function operationStatus(entry) {
     return entry[activeOperation === scheduleName ? 4 : 3] || (activeOperation === scheduleName ? 'Scheduled' : 'Active');
 }
 
+function saleProductNames(entry) {
+    return String(entry[3] ?? '').split(/,\s+(?=\d+\s+×\s+)/)
+        .filter(line => /^\d+\s+×\s+/.test(line))
+        .map(line => line.replace(/^\d+\s+×\s+/, '').trim())
+        .filter(Boolean);
+}
+
+function saleMatchesProduct(entry, product) {
+    return !product || saleProductNames(entry).some(name => name.toLowerCase() === product);
+}
+
+function selectedReportService(value) {
+    return serviceTypes.find(service => value === 'service:' + service);
+}
+
+function reportEntries(selection) {
+    const service = selectedReportService(selection);
+    if (!service) return records.Reports.filter(entry => saleMatchesProduct(entry, selection));
+    return (records[scheduleName] ?? []).filter(entry => entry[1] === service)
+        .map(([pet, , date, time, status, , reference]) => [reference || '—', pet, date, time, status || 'Scheduled']);
+}
+
+const bookingReportColumns = ['Reference', 'Pet', 'Appointment date', 'Time', 'Status'];
+
+function renderSalesPicker(input) {
+    const picker = input.closest('details');
+    const items = picker.querySelector('.sales-picker-items');
+    const names = new Map();
+    for (const name of [...products.map(productLabel), ...records.Reports.flatMap(saleProductNames)]) {
+        names.set(name.toLowerCase(), name);
+    }
+    const options = [...names].sort(([, left], [, right]) => left.localeCompare(right));
+    if (options.length !== items.children.length ||
+        options.some(([value, label], index) => items.children[index].dataset.salesChoice !== value ||
+            items.children[index].textContent !== label)) {
+        items.replaceChildren(...options.map(([value, label]) => {
+            const choice = retailNode('button', '', label);
+            choice.type = 'button';
+            choice.dataset.salesChoice = value;
+            return choice;
+        }));
+    }
+    const selected = [...picker.querySelectorAll('[data-sales-choice]')]
+        .find(choice => choice.dataset.salesChoice === input.value);
+    if (!selected) input.value = '';
+    document.getElementById(input.id + '-selection').textContent = selected?.textContent ?? 'All products';
+    return input.value;
+}
+
+function bindSalesPicker(input, onChange) {
+    const picker = input.closest('details');
+    const summary = picker.querySelector('summary');
+    const productsGroup = picker.querySelector('.sales-picker-products');
+    picker.addEventListener('click', event => {
+        const choice = event.target.closest('[data-sales-choice]');
+        if (!choice) return;
+        input.value = choice.dataset.salesChoice;
+        picker.open = false;
+        summary.focus();
+        onChange();
+    });
+    picker.addEventListener('toggle', () => {
+        if (!picker.open) productsGroup.open = false;
+    });
+    picker.addEventListener('keydown', event => {
+        if (event.key !== 'Escape' || !picker.open) return;
+        event.preventDefault();
+        picker.open = false;
+        summary.focus();
+    });
+    document.addEventListener('click', event => {
+        if (picker.open && !picker.contains(event.target)) picker.open = false;
+    });
+}
+
 function filteredOperations() {
     const query = operationSearch.value.trim().toLowerCase();
-    return records[activeOperation].map((entry, index) => ({ entry, index })).filter(({ entry }) => {
+    const entries = activeOperation === 'Reports' ? reportEntries(reportProduct.value) : records[activeOperation];
+    return entries.map((entry, index) => ({ entry, index })).filter(({ entry }) => {
+        if (admin.dataset.page === 'Booking' && !entry[7]) return false;
         const searchValues = activeOperation === scheduleName ? [...entry, petOwner(entry[0])] : activeOperation === 'Pets' ? entry.slice(0, 5) : entry;
         if (query && !searchValues.some(value => String(value ?? '').toLowerCase().includes(query))) return false;
         if (activeOperation === 'Reports') {
@@ -263,7 +350,8 @@ function filteredOperations() {
         const value = activeOperation === 'Pets' ? entry[2] : activeOperation === staffName ? entry[1] : operationStatus(entry);
         return value.toLowerCase() === operationFilter.value.toLowerCase();
     }).sort(({ entry: left }, { entry: right }) => {
-        if (activeOperation === scheduleName) return (left[2] + left[3]).localeCompare(right[2] + right[3]);
+        if (activeOperation === scheduleName) return Number(right[4] === 'Pending') - Number(left[4] === 'Pending') ||
+            (left[2] + left[3]).localeCompare(right[2] + right[3]);
         if (activeOperation === 'Reports') return right[2].localeCompare(left[2]);
         return left[0].localeCompare(right[0]);
     });
@@ -272,14 +360,14 @@ function filteredOperations() {
 function renderOperationFilter() {
     const previous = operationFilter.value;
     const species = [...new Map(records.Pets.map(entry => [entry[2].toLowerCase(), entry[2]])).values()].sort();
-    const options = activeOperation === 'Pets' ? species : activeOperation === staffName ? staffRoles : bookingStatuses;
+    const options = activeOperation === 'Pets' ? species : activeOperation === staffName ? staffRoles : bookingFilterStatuses;
     operationFilter.replaceChildren(new Option('All ' + ({ Pets: 'species', [staffName]: 'roles' }[activeOperation] ?? 'statuses'), ''),
         ...options.map(value => new Option(value, value)));
     operationFilter.value = options.includes(previous) ? previous : '';
 }
 
 function renderOperationStats(matches) {
-    const all = records[activeOperation];
+    const all = admin.dataset.page === 'Booking' ? records[activeOperation].filter(entry => entry[7]) : records[activeOperation];
     const today = localDate();
     let stats;
     if (activeOperation === 'Pets') {
@@ -290,8 +378,14 @@ function renderOperationStats(matches) {
             ['Upcoming', scheduled.filter(entry => entry[2] >= today).length],
             ['Completed', all.filter(entry => operationStatus(entry) === 'Completed').length]];
     } else if (activeOperation === 'Reports') {
-        const revenue = salesRevenue(matches.map(({ entry }) => entry));
-        stats = [['Sales in view', matches.length], ['Sales total', pesos(revenue)], ['Average sale', pesos(matches.length ? revenue / matches.length : 0)]];
+        if (selectedReportService(reportProduct.value)) {
+            const completed = matches.filter(({ entry }) => entry[4] === 'Completed').length;
+            const scheduled = matches.filter(({ entry }) => entry[4] === 'Scheduled').length;
+            stats = [['Bookings in view', matches.length], ['Scheduled', scheduled], ['Completed', completed]];
+        } else {
+            const revenue = salesRevenue(matches.map(({ entry }) => entry));
+            stats = [['Sales in view', matches.length], ['Sales total', pesos(revenue)], ['Average sale', pesos(matches.length ? revenue / matches.length : 0)]];
+        }
     } else {
         stats = [['Staff members', all.length], ['Active staff', all.filter(entry => operationStatus(entry) === 'Active').length]];
     }
@@ -304,9 +398,49 @@ function renderOperationStats(matches) {
 
 function operationActions(index) {
     const actions = retailNode('div', 'operation-actions');
-    actions.append(retailButton('View', () => openOperation('view', index), 'plain'),
-        ...((isStaff && activeOperation === scheduleName) ? [] : [retailButton(isStaff ? 'Request edit' : 'Edit', () => openOperation('edit', index), 'plain')]));
+    const booking = activeOperation === scheduleName ? records[scheduleName][index] : null;
+    if (booking?.[7]) {
+        actions.append(retailButton('View', () => openOperation('view', index), 'plain'));
+        if (!isStaff) return actions;
+        const add = (label, status) => actions.append(retailButton(label, () => updateBooking(booking[6], status), 'plain'));
+        if (booking[4] === 'Pending') {
+            add('Accept', 'Scheduled');
+            add('Reject', 'Rejected');
+        } else if (booking[4] === 'Scheduled') {
+            add('Cancel', 'Cancelled');
+        } else if (booking[4] === 'Checked in') {
+            add('Check out', 'Completed');
+            add('Cancel', 'Cancelled');
+        }
+        return actions;
+    }
+    actions.append(retailButton('View', () => openOperation('view', index), 'plain'));
+    if (isStaff ? activeOperation === 'Pets' : activeOperation !== 'Pets') {
+        actions.append(retailButton(isStaff ? 'Request edit' : 'Edit', () => openOperation('edit', index), 'plain'));
+    }
     return actions;
+}
+
+let bookingUpdating = false;
+async function updateBooking(id, status) {
+    if (bookingUpdating) return;
+    if (status === 'Cancelled' && !window.confirm('Cancel this appointment?')) return;
+    bookingUpdating = true;
+    try {
+        const result = await shopRequest('customer_booking_status', { id, status });
+        acceptShop(result);
+        if (operationDialog.open && ['Checked in', 'Completed'].includes(status)) operationDialog.close();
+        refreshDashboard();
+        if (activeOperation === scheduleName && [scheduleName, 'Booking'].includes(admin.dataset.page)) {
+            renderOperation();
+            operationMessage.textContent = result.notice;
+        }
+    } catch (error) {
+        if (operationDialog.open && ['Checked in', 'Completed'].includes(status)) operationError.textContent = error.message;
+        else operationMessage.textContent = error.message;
+    } finally {
+        bookingUpdating = false;
+    }
 }
 
 function renderPetCards(entries) {
@@ -335,7 +469,9 @@ function renderOperationTable(entries, config) {
     rows.replaceChildren();
     const headers = head.insertRow();
     const isReport = activeOperation === 'Reports';
-    for (const label of isReport ? config.columns : [...config.columns, 'Actions']) {
+    const bookingReport = isReport && selectedReportService(reportProduct.value);
+    const columns = bookingReport ? bookingReportColumns : config.columns;
+    for (const label of isReport ? columns : [...columns, 'Actions']) {
         const column = retailNode('th', '', label);
         column.scope = 'col';
         headers.append(column);
@@ -349,7 +485,7 @@ function renderOperationTable(entries, config) {
                 const download = retailButton('Download receipt', () => downloadSaleReceipt(id, download), 'link');
                 receiptCell.append(retailNode('br'), download);
             }
-            [customer, formatDay(date), details, pesos(total)].forEach(value => appendCell(row, value));
+            [customer, formatDay(date), details, bookingReport ? total : pesos(total)].forEach(value => appendCell(row, value));
             continue;
         }
         const identity = appendCell(row, '', 'operation-identity');
@@ -368,7 +504,7 @@ function renderOperationTable(entries, config) {
 }
 
 let salesGroup = 'day';
-const salesChartLabels = { day: 'days', week: 'weeks', month: 'months' };
+const salesChartLabels = { day: 'days', week: 'weeks', month: 'months', year: 'years' };
 const salesAxisDate = new Intl.DateTimeFormat('en-PH', { month: 'short', day: 'numeric', timeZone: 'UTC' });
 const salesAxisMonth = new Intl.DateTimeFormat('en-PH', { month: 'short', year: '2-digit', timeZone: 'UTC' });
 const salesAxisMoney = new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP', notation: 'compact', maximumFractionDigits: 1 });
@@ -380,21 +516,23 @@ function trendBucket(date, group) {
 
 function shiftTrendBucket(date, group, count) {
     const shifted = utcSaleDate(date);
-    if (group === 'month') shifted.setUTCMonth(shifted.getUTCMonth() + count);
+    if (group === 'year') shifted.setUTCFullYear(shifted.getUTCFullYear() + count);
+    else if (group === 'month') shifted.setUTCMonth(shifted.getUTCMonth() + count);
     else shifted.setUTCDate(shifted.getUTCDate() + count * (group === 'week' ? 7 : 1));
     return shifted.toISOString().slice(0, 10);
 }
 
-function salesTrendSeries(entries, group, from, to) {
+function salesTrendSeries(entries, group, from, to, countBookings = false) {
     const count = group === 'day' ? 14 : 12;
     const lastDate = to || entries.reduce((latest, entry) => entry[2] > latest ? entry[2] : latest, '') || localDate();
     if (from && from > lastDate) return [];
     const last = trendBucket(lastDate, group);
-    const first = from ? trendBucket(from, group) : '';
+    const earliest = group === 'year' ? entries.reduce((oldest, entry) => entry[2] < oldest ? entry[2] : oldest, lastDate) : '';
+    const first = from || earliest ? trendBucket(from || earliest, group) : '';
     const totals = new Map();
     for (const entry of entries) {
         const key = trendBucket(entry[2], group);
-        totals.set(key, (totals.get(key) ?? 0) + Math.round(Number(entry[4]) * 100));
+        totals.set(key, (totals.get(key) ?? 0) + (countBookings ? 100 : Math.round(Number(entry[4]) * 100)));
     }
     return Array.from({ length: count }, (_, index) => shiftTrendBucket(last, group, index + 1 - count))
         .filter(date => date >= first)
@@ -410,21 +548,24 @@ function chartElement(tag, attributes, value) {
 
 function renderSalesTrend(matches) {
     const entries = matches.map(({ entry }) => entry);
-    const series = salesTrendSeries(entries, salesGroup, reportFrom.value, reportTo.value);
+    const bookingReport = Boolean(selectedReportService(reportProduct.value));
+    const series = salesTrendSeries(entries, salesGroup, reportFrom.value, reportTo.value, bookingReport);
     const chart = retail('#sales-chart');
     const detail = retail('#sales-chart-point');
     const range = retail('#sales-chart-range');
+    retail('#report-trend-title').textContent = bookingReport ? 'Booking trend' : 'Sales trend';
     detail.textContent = '';
     const limit = salesGroup === 'day' ? 14 : 12;
-    range.textContent = 'Latest ' + limit + ' ' + salesChartLabels[salesGroup] + ' in the selected date range.';
+    range.textContent = salesGroup === 'year' ? (bookingReport ? 'Bookings' : 'Sales') + ' by calendar year, up to the latest ' + limit + ' years.' :
+        'Latest ' + limit + ' ' + salesChartLabels[salesGroup] + ' in the selected date range.';
     if (!series.length || !entries.length) {
-        chart.replaceChildren(retailNode('p', 'sales-trend-empty', 'No sales in this view.'));
+        chart.replaceChildren(retailNode('p', 'sales-trend-empty', bookingReport ? 'No bookings in this view.' : 'No sales in this view.'));
         return;
     }
 
     const peak = Math.max(1, ...series.map(point => point.amount));
     const power = 10 ** Math.floor(Math.log10(peak));
-    const ceiling = Math.ceil(peak / power * 2) * power / 2;
+    const ceiling = bookingReport ? Math.ceil(peak / 4) * 4 : Math.ceil(peak / power * 2) * power / 2;
     const width = 680;
     const height = 235;
     const left = 62;
@@ -433,22 +574,24 @@ function renderSalesTrend(matches) {
     const bottom = 190;
     const x = index => series.length === 1 ? (left + right) / 2 : left + (right - left) * index / (series.length - 1);
     const y = amount => bottom - (bottom - top) * Math.max(0, amount) / ceiling;
-    const svg = chartElement('svg', { viewBox: '0 0 ' + width + ' ' + height, role: 'group', 'aria-label': 'Sales by ' + salesGroup });
+    const svg = chartElement('svg', { viewBox: '0 0 ' + width + ' ' + height, role: 'group', 'aria-label': (bookingReport ? 'Bookings by ' : 'Sales by ') + salesGroup });
     for (let tick = 0; tick <= 4; tick++) {
         const amount = ceiling * tick / 4;
         const position = y(amount);
         svg.append(chartElement('line', { x1: left, x2: right, y1: position, y2: position, class: 'sales-gridline' }),
-            chartElement('text', { x: left - 8, y: position + 4, 'text-anchor': 'end' }, salesAxisMoney.format(amount)));
+            chartElement('text', { x: left - 8, y: position + 4, 'text-anchor': 'end' }, bookingReport ? amount : salesAxisMoney.format(amount)));
     }
     const points = series.map(({ amount }, index) => x(index) + ',' + y(amount)).join(' ');
     svg.append(chartElement('polyline', { points, class: 'sales-chart-line' }));
     const labelStep = Math.max(1, Math.ceil((series.length - 1) / 5));
     series.forEach(({ date, amount }, index) => {
-        const dateLabel = salesGroup === 'month' ? salesAxisMonth.format(utcSaleDate(date)) : salesAxisDate.format(utcSaleDate(date));
+        const dateLabel = salesGroup === 'year' ? date.slice(0, 4) :
+            salesGroup === 'month' ? salesAxisMonth.format(utcSaleDate(date)) : salesAxisDate.format(utcSaleDate(date));
         if (index === 0 || index === series.length - 1 || (index % labelStep === 0 && index < series.length - 1 - labelStep / 2)) {
             svg.append(chartElement('text', { x: x(index), y: bottom + 25, 'text-anchor': 'middle' }, dateLabel));
         }
-        const label = (salesGroup === 'week' ? 'Week of ' : '') + formatDay(date) + ' · ' + pesos(amount);
+        const periodLabel = salesGroup === 'year' ? dateLabel : (salesGroup === 'week' ? 'Week of ' : '') + formatDay(date);
+        const label = periodLabel + ' · ' + (bookingReport ? amount + (amount === 1 ? ' booking' : ' bookings') : pesos(amount));
         const marker = chartElement('circle', { cx: x(index), cy: y(amount), r: 5, tabindex: 0, 'aria-label': label, class: 'sales-chart-marker' });
         marker.append(chartElement('title', {}, label));
         for (const event of ['focus', 'pointerenter', 'click']) marker.addEventListener(event, () => { detail.textContent = label; });
@@ -467,6 +610,9 @@ document.querySelectorAll('[data-sales-group]').forEach(button => {
 
 function renderOperation() {
     const config = sections[activeOperation];
+    if (activeOperation === 'Reports') renderSalesPicker(reportProduct);
+    retail('#report-product-note').hidden = activeOperation !== 'Reports' || !reportProduct.value ||
+        Boolean(selectedReportService(reportProduct.value));
     const results = filteredOperations();
     const totalPages = Math.max(1, Math.ceil(results.length / operationPageSize));
     operationPage = Math.min(operationPage, totalPages);
@@ -477,7 +623,8 @@ function renderOperation() {
     cards.hidden = Boolean(pageEntries.length && activeOperation !== 'Pets');
     table.hidden = !pageEntries.length || activeOperation === 'Pets';
     if (!pageEntries.length) {
-        const hasRecords = records[activeOperation].length > 0;
+        const hasRecords = activeOperation === 'Reports' ? reportEntries(reportProduct.value).length > 0 :
+            records[activeOperation].some(entry => admin.dataset.page !== 'Booking' || entry[7]);
         cards.replaceChildren(retailNode('p', 'operation-empty', hasRecords ? 'No records match these filters.' : 'No records yet.'));
     } else if (activeOperation === 'Pets') renderPetCards(pageEntries);
     else renderOperationTable(pageEntries, config);
@@ -485,7 +632,10 @@ function renderOperation() {
     if (activeOperation === 'Reports') renderSalesTrend(results);
     const invalidDates = activeOperation === 'Reports' && reportFrom.value && reportTo.value && reportFrom.value > reportTo.value;
     reportTo.setCustomValidity(invalidDates ? 'Choose an end date on or after the start date.' : '');
-    if (activeOperation === 'Reports') operationAction.disabled = !results.length || invalidDates;
+    if (activeOperation === 'Reports') {
+        operationAction.disabled = !results.length || invalidDates;
+        exportSalesPdfButton.disabled = operationAction.disabled;
+    }
     const count = retail('#operation-count');
     count.textContent = invalidDates ? 'Choose an end date on or after the start date.' : results.length
         ? 'Showing ' + (start + 1) + '–' + Math.min(start + operationPageSize, results.length) + ' of ' + results.length
@@ -495,7 +645,7 @@ function renderOperation() {
         operationPage = next;
         renderOperation();
     });
-    retail('#operation-reset').hidden = !(operationSearch.value || operationFilter.value || reportFrom.value || reportTo.value);
+    retail('#operation-reset').hidden = !(operationSearch.value || operationFilter.value || reportProduct.value || reportFrom.value || reportTo.value);
 }
 
 let petPhoto = '';
@@ -552,7 +702,7 @@ function petPhotoField(photo, view) {
 function openOperation(mode, index = -1) {
     const config = sections[activeOperation];
     const entry = records[activeOperation][index];
-    if (isStaff && activeOperation === scheduleName && mode !== 'view') return;
+    if (mode !== 'view' && (isStaff ? activeOperation !== 'Pets' : activeOperation === 'Pets')) return;
     const view = mode === 'view';
     editingRecord = index;
     retail('#operation-dialog-title').textContent = { view: 'View ', edit: 'Edit ', add: 'Add ' }[mode] + config.noun;
@@ -595,6 +745,14 @@ function openOperation(mode, index = -1) {
     retail('#save-operation').textContent = isStaff ? 'Send for Approval' : 'Save';
     retail('#remove-operation').textContent = isStaff ? 'Request removal' : 'Remove';
     retail('#remove-operation').hidden = mode !== 'edit';
+    const attendance = retail('#appointment-attendance');
+    attendance.hidden = !(view && isStaff && activeOperation === scheduleName && entry?.[7] &&
+        ['Scheduled', 'Checked in'].includes(entry[4]));
+    if (!attendance.hidden) {
+        const checkingOut = entry[4] === 'Checked in';
+        attendance.textContent = checkingOut ? 'Check out' : 'Check in';
+        attendance.onclick = () => updateBooking(entry[6], checkingOut ? 'Completed' : 'Checked in');
+    }
     operationDialog.showModal();
 }
 
@@ -623,6 +781,7 @@ operationForm.addEventListener('submit', async event => {
             return;
         }
         values.push(petPhoto);
+        if (existing?.length > 6) values.push(...existing.slice(6));
     }
     if (activeOperation === scheduleName) {
         const pet = records.Pets.find(([name]) => name.toLowerCase() === values[0].toLowerCase());
@@ -644,7 +803,8 @@ operationForm.addEventListener('submit', async event => {
         return;
     }
     if (activeOperation === scheduleName && values[4] !== 'Cancelled' && entries.some((entry, index) =>
-        index !== editingRecord && entry[4] !== 'Cancelled' && entry[0] === values[0] && entry[2] === values[2] && entry[3] === values[3])) {
+        index !== editingRecord && !['Cancelled', 'Rejected', 'Request expired', 'Cancelled - No-show'].includes(entry[4]) &&
+        entry[0] === values[0] && entry[2] === values[2] && entry[3] === values[3])) {
         operationError.textContent = 'This pet already has an appointment at that date and time.';
         return;
     }
@@ -657,7 +817,7 @@ operationForm.addEventListener('submit', async event => {
         } catch (error) { operationError.textContent = error.message; }
         return;
     }
-    if (activeOperation === scheduleName && existing?.length > 6) values.push(...existing.slice(6));
+    if (activeOperation === scheduleName) values.push(...(existing?.slice(5) ?? []));
     const next = [...entries];
     if (editingRecord < 0) next.unshift(values);
     else next[editingRecord] = values;
@@ -711,7 +871,8 @@ document.querySelector('#remove-operation').addEventListener('click', async () =
 });
 
 function exportSales() {
-    const rows = [sections.Reports.columns, ...filteredOperations().map(({ entry }) => entry)];
+    const bookingReport = Boolean(selectedReportService(reportProduct.value));
+    const rows = [bookingReport ? bookingReportColumns : sections.Reports.columns, ...filteredOperations().map(({ entry }) => entry)];
     const csv = rows.map(row => row.map(value => {
         let cell = String(value ?? '');
         if (typeof value === 'string' && /^[\s]*[=+@\-\t\r\n]/.test(cell)) cell = "'" + cell;
@@ -720,15 +881,42 @@ function exportSales() {
     const url = URL.createObjectURL(new Blob(['\uFEFF', csv], { type: 'text/csv;charset=utf-8' }));
     const download = document.createElement('a');
     download.href = url;
-    download.download = 'rems-sales-' + localDate() + '.csv';
+    download.download = 'rems-' + (bookingReport ? 'bookings-' : 'sales-') + localDate() + '.csv';
     download.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
-    operationMessage.textContent = 'Sales CSV downloaded.';
+    operationMessage.textContent = bookingReport ? 'Bookings CSV downloaded.' : 'Sales CSV downloaded.';
 }
+
+exportSalesPdfButton.addEventListener('click', () => {
+    if (activeOperation !== 'Reports' || exportSalesPdfButton.disabled) return;
+    const entries = filteredOperations().map(({ entry }) => entry);
+    const bookingReport = Boolean(selectedReportService(reportProduct.value));
+    const columns = bookingReport ? bookingReportColumns : sections.Reports.columns;
+    const title = bookingReport ? 'Service Booking Report' : 'Sales Report';
+    const details = [
+        retail('#report-product-selection').textContent,
+        'From: ' + (reportFrom.value ? formatDay(reportFrom.value) : 'Any date'),
+        'To: ' + (reportTo.value ? formatDay(reportTo.value) : 'Any date'),
+        bookingReport ? 'Bookings: ' + entries.length :
+            'Sales: ' + entries.length + ' | Total: ' + pesos(salesRevenue(entries)),
+        ...entries.map(entry => entry.map((value, index) => {
+            const formatted = index === 2 ? formatDay(value) : index === 4 && !bookingReport ? pesos(value) : value;
+            return columns[index] + ': ' + formatted;
+        }).join('\n'))
+    ];
+    try {
+        downloadReceiptPdf(title, details.join('\n\n'),
+            'rems-' + (bookingReport ? 'bookings-' : 'sales-') + localDate() + '.pdf');
+        operationMessage.textContent = 'PDF downloaded.';
+    } catch {
+        operationMessage.textContent = 'Could not export the PDF. Try again.';
+    }
+});
 
 function resetOperations() {
     operationSearch.value = '';
     operationFilter.value = '';
+    reportProduct.value = '';
     reportPeriod.value = 'all';
     reportFrom.value = '';
     reportTo.value = '';
@@ -747,8 +935,9 @@ function applySalesPeriod(period) {
         return;
     }
     const today = localDate();
-    if (['today', 'week', 'month'].includes(period)) {
-        salesGroup = { today: 'day', week: 'day', month: 'week' }[period];
+    const group = { today: 'day', week: 'day', month: 'week', year: 'year' }[period];
+    if (group) {
+        salesGroup = group;
         document.querySelectorAll('[data-sales-group]').forEach(button => {
             button.setAttribute('aria-pressed', button.dataset.salesGroup === salesGroup);
         });
@@ -761,8 +950,15 @@ function applySalesPeriod(period) {
 }
 
 reportPeriod.addEventListener('change', () => applySalesPeriod(reportPeriod.value));
-document.querySelectorAll('[data-sales-period]').forEach(card => {
-    card.addEventListener('click', () => applySalesPeriod(card.dataset.salesPeriod));
+dashboardSalesPeriod?.addEventListener('change', () => renderDashboardSales(localDate()));
+if (dashboardSalesProduct) bindSalesPicker(dashboardSalesProduct, () => renderDashboardSales(localDate()));
+bindSalesPicker(reportProduct, () => {
+    operationPage = 1;
+    renderOperation();
+});
+document.querySelector('#dashboard-sales-report')?.addEventListener('click', () => {
+    reportProduct.value = dashboardSalesProduct.value;
+    applySalesPeriod(dashboardSalesPeriod.value);
 });
 for (const field of [operationSearch, operationFilter, reportFrom, reportTo]) {
     field.addEventListener('input', () => {
@@ -780,15 +976,17 @@ document.querySelector('#operation-reset').addEventListener('click', () => {
 document.addEventListener('rems:section', event => {
     refreshDashboard();
     if (operations.hidden) return;
-    activeOperation = event.detail;
+    const bookingPage = event.detail === 'Booking';
+    activeOperation = bookingPage ? scheduleName : event.detail;
     const config = sections[activeOperation];
     const report = activeOperation === 'Reports';
     resetOperations();
     operationMessage.textContent = '';
-    retail('#operations-title').textContent = config.title;
-    retail('#operations-intro').textContent = config.description;
+    retail('#operations-title').textContent = bookingPage ? 'Booking' : config.title;
+    retail('#operations-intro').textContent = bookingPage ? 'Manage appointment requests from the customer portal.' : config.description;
     operationAction.textContent = report ? 'Export CSV' : '+ ' + (activeOperation === scheduleName ? 'Schedule Appointment' : 'Add ' + config.noun);
-    operationAction.hidden = isStaff && activeOperation === scheduleName;
+    exportSalesPdfButton.hidden = !report;
+    operationAction.hidden = isStaff ? activeOperation !== 'Pets' : activeOperation === 'Pets';
     if (isStaff && activeOperation === 'Pets') operationAction.textContent = 'Request New Pet';
     operationAction.disabled = false;
     operationSearch.placeholder = config.search;

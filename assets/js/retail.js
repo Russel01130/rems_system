@@ -45,6 +45,11 @@ const saleDiscountLabels = { '': 'Discount', senior: 'Senior Citizen Discount (2
 const validDiscountType = type => typeof type === 'string' && Object.hasOwn(saleDiscountLabels, type);
 const discountForSubtotal = (type, subtotal) => type === '' ? 0 : Math.round(subtotal / 5);
 const saleMessage = retail('#sale-message');
+const holdExpiryMessage = retail('#hold-expiry-message');
+const hourMs = 60 * 60 * 1000;
+const holdDeadlineFormat = new Intl.DateTimeFormat('en-PH', {
+    dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Manila'
+});
 const posSearch = retail('#pos-search');
 const categorySelect = retail('#pos-category');
 const payment = retail('#payment-dialog');
@@ -60,6 +65,7 @@ try {
     // Cart storage is optional.
 }
 let savedSales = localSales.saved ?? (admin.dataset.role === 'admin' ? records.SavedSales : null) ?? [];
+const legacyHoldDeadline = Date.now() + 4 * hourMs;
 const initialDraft = localSales.draft ?? (admin.dataset.role === 'admin' ? records.RetailDraft : null);
 let cart = new Map(initialDraft?.lines ?? []);
 discountInput.value = validDiscountType(initialDraft?.discountType) ? initialDraft.discountType : '';
@@ -71,6 +77,7 @@ function storeLocalSales(draft, saved = savedSales) {
 
 let catalogPage = 1;
 let catalogLayout = 'grid';
+const posVariantSelections = new Map();
 
 function retailPages(target, page, total, go) {
     const container = retail(target);
@@ -104,26 +111,28 @@ function productPicture(product) {
 function renderCatalog() {
     const category = categorySelect.value;
     const query = posSearch.value.trim().toLowerCase();
-    const matching = products.filter(product => (!category || product[1] === category) &&
-        (productLabel(product).toLowerCase().includes(query) || productBarcodes(product).some(code => code.toLowerCase().includes(query))));
+    const variants = products.map(product => ({
+        id: product[6], name: product[0], label: productLabel(product), category: product[1],
+        unit: product[8]?.unit ?? '', price: product[2], stock: product[3], lowStock: isLowStock(product), product
+    }));
+    const matching = groupCatalogVariants(variants, variant => (!category || variant.category === category) &&
+        (variant.label.toLowerCase().includes(query) || productBarcodes(variant.product).some(code => code.toLowerCase().includes(query))),
+    posVariantSelections);
     const maxPage = Math.max(1, Math.ceil(matching.length / 6));
     catalogPage = Math.min(catalogPage, maxPage);
     const start = (catalogPage - 1) * 6;
     const grid = retail('#catalog-products');
     grid.dataset.layout = catalogLayout;
     grid.replaceChildren();
-    for (const product of matching.slice(start, start + 6)) {
-        const [, , price, stock, , , id] = product;
-        const name = productLabel(product);
-        const card = retailNode('article', 'catalog-item');
-        const info = retailNode('div', 'catalog-info');
-        const add = retailButton('+', () => changeQuantity(id, 1), 'add-to-cart');
-        add.setAttribute('aria-label', 'Add ' + name + ' to cart');
-        add.disabled = stock <= (cart.get(id) ?? 0);
-        info.append(retailNode('h2', '', name), retailNode('strong', '', pesos(price)),
-            retailNode('span', stock === 0 || isLowStock(product) ? 'stock-warning' : 'stock-ready', 'Stock: ' + stock), add);
-        card.append(productPicture(product), info);
-        grid.append(card);
+    for (const group of matching.slice(start, start + 6)) {
+        grid.append(catalogVariantCard(group, {
+            selections: posVariantSelections,
+            formatPrice: pesos,
+            picture: variant => productPicture(variant.product),
+            stockText: stock => 'Stock: ' + stock,
+            canAdd: variant => variant.stock > (cart.get(variant.id) ?? 0),
+            addVariant: id => changeQuantity(id, 1)
+        }));
     }
     if (!matching.length) grid.append(retailNode('p', 'retail-empty', 'No products match your search.'));
     retail('#pos-count').textContent = matching.length ? 'Showing ' + (start + 1) + '–' + Math.min(start + 6, matching.length) + ' of ' + matching.length + ' products' : 'Showing 0 products';
@@ -200,19 +209,25 @@ function persistDraft(nextCart) {
 
 function changeQuantity(id, change) {
     const quantity = (cart.get(id) ?? 0) + change;
+    if (setCartQuantity(id, quantity)) refreshSale();
+}
+
+function setCartQuantity(id, quantity) {
     if (quantity > (products.find(entry => entry[6] === id)?.[3] ?? 0)) {
         saleMessage.textContent = 'There is insufficient stock for that quantity.';
-        return;
+        return false;
     }
     const next = new Map(cart);
     if (quantity <= 0) next.delete(id);
     else next.set(id, quantity);
     saleMessage.textContent = '';
-    if (persistDraft(next)) refreshSale();
+    return persistDraft(next);
 }
 
 function renderSaleTotals() {
-    const { subtotal, discount, total } = currentSale();
+    const { lines, subtotal, discount, total } = currentSale();
+    const count = lines.reduce((sum, line) => sum + (line.product ? line.quantity : 0), 0);
+    retail('#sale-title').textContent = '🛒 Current Sale (' + count + ')';
     retail('#sale-subtotal').textContent = pesos(subtotal / 100);
     retail('#discount-total').textContent = pesos(discount / 100);
     retail('#sale-total').textContent = pesos(total / 100);
@@ -224,7 +239,6 @@ function refreshSale() {
     const items = retail('#cart-lines');
     items.replaceChildren();
     const lines = currentSale().lines.filter(line => line.product);
-    retail('#sale-title').textContent = '🛒 Current Sale (' + lines.reduce((sum, line) => sum + line.quantity, 0) + ')';
     if (!lines.length) items.append(retailNode('p', 'retail-empty', 'Add products to start a sale.'));
     for (const { product, quantity } of lines) {
         const [, , price, stock, , , id] = product;
@@ -238,10 +252,37 @@ function refreshSale() {
         minus.setAttribute('aria-label', 'Decrease ' + name);
         plus.setAttribute('aria-label', 'Increase ' + name);
         plus.disabled = quantity >= stock;
-        const remove = retailButton('×', () => changeQuantity(id, -quantity), 'plain cart-remove');
+        const remove = retailButton('×', () => changeQuantity(id, -cart.get(id)), 'plain cart-remove');
         remove.setAttribute('aria-label', 'Remove ' + name);
-        steps.append(minus, retailNode('span', '', quantity), plus);
-        controls.append(steps, retailNode('strong', '', pesos(cents(price) * quantity / 100)));
+        const quantityInput = retailNode('input', 'cart-quantity');
+        quantityInput.type = 'number';
+        quantityInput.inputMode = 'numeric';
+        quantityInput.min = '1';
+        quantityInput.max = String(stock);
+        quantityInput.value = String(quantity);
+        quantityInput.setAttribute('aria-label', 'Quantity for ' + name);
+        const lineTotal = retailNode('strong', '', pesos(cents(price) * quantity / 100));
+        quantityInput.addEventListener('change', () => {
+            const requested = quantityInput.valueAsNumber;
+            if (!Number.isSafeInteger(requested) || requested < 1) {
+                saleMessage.textContent = 'Enter a whole quantity of at least 1.';
+            } else if (setCartQuantity(id, requested)) {
+                lineTotal.textContent = pesos(cents(price) * requested / 100);
+                plus.disabled = requested >= stock;
+                const add = [...retail('#catalog-products').querySelectorAll('.add-to-cart')]
+                    .find(button => button.dataset.productId === id);
+                if (add) add.disabled = plus.disabled;
+                renderSaleTotals();
+            }
+            quantityInput.value = String(cart.get(id));
+        });
+        quantityInput.addEventListener('keydown', event => {
+            if (event.key !== 'Enter') return;
+            event.preventDefault();
+            quantityInput.blur();
+        });
+        steps.append(minus, quantityInput, plus);
+        controls.append(steps, lineTotal);
         details.append(retailNode('strong', '', name), retailNode('span', '', pesos(price)), controls);
         row.append(productPicture(product), details, remove);
         items.append(row);
@@ -270,9 +311,33 @@ function updateSaleState(draft, saved = savedSales) {
 }
 
 function renderSavedSales() {
+    const now = Date.now();
+    let changed = false;
+    const updated = savedSales.map(sale => {
+        if (sale.kind !== 'Held') return sale;
+        const legacyDate = Date.parse(sale.savedOn + 'T23:59:59+08:00');
+        const expiresAt = Number.isFinite(sale.expiresAt) ? sale.expiresAt :
+            Math.min(legacyHoldDeadline, Number.isFinite(legacyDate) ? legacyDate + 4 * hourMs : Infinity);
+        const kind = now >= expiresAt ? 'Declined' : 'Held';
+        if (expiresAt === sale.expiresAt && kind === sale.kind) return sale;
+        changed = true;
+        return { ...sale, expiresAt, kind };
+    });
+    if (changed) {
+        try {
+            storeLocalSales(draftSale(), updated);
+        } catch {
+            savedSales = updated;
+        }
+    }
+    const expired = savedSales.filter(sale => sale.kind === 'Declined').length;
+    holdExpiryMessage.hidden = !expired;
+    const expiryNotice = expired === 1 ? 'A held sale was declined because its hold duration expired.' :
+        expired + ' held sales were declined because their hold durations expired.';
+    if (expired && holdExpiryMessage.textContent !== expiryNotice) holdExpiryMessage.textContent = expiryNotice;
     const saved = retail('#saved-sales');
     saved.replaceChildren();
-    for (const kind of ['Held', 'Parked']) {
+    for (const kind of ['Held', 'Parked', 'Declined']) {
         const sales = savedSales.filter(sale => sale.kind === kind);
         if (!sales.length) continue;
         const group = retailNode('section', 'saved-sale-group');
@@ -283,7 +348,7 @@ function renderSavedSales() {
             const units = sale.lines.reduce((total, [, quantity]) => total + quantity, 0);
             label.append(retailNode('strong', '', 'Walk-in'),
                 retailNode('small', '', units + (units === 1 ? ' item' : ' items') + (sale.savedOn ? ' · ' + dateFormat.format(new Date(sale.savedOn + 'T12:00')) : '')));
-            const resume = retailButton('Resume', () => resumeSale(sale));
+            if (sale.expiresAt) label.append(retailNode('small', '', (kind === 'Declined' ? 'Hold expired ' : 'Hold expires ') + holdDeadlineFormat.format(sale.expiresAt)));
             const discard = retailButton('Discard', () => {
                 if (!window.confirm('Discard this ' + kind.toLowerCase() + ' sale?')) return;
                 try {
@@ -294,7 +359,9 @@ function renderSavedSales() {
                     saleMessage.textContent = 'The saved sale could not be discarded.';
                 }
             }, 'link');
-            row.append(label, resume, discard);
+            row.append(label);
+            if (kind !== 'Declined') row.append(retailButton('Resume', () => resumeSale(sale)));
+            row.append(discard);
             group.append(row);
         }
         saved.append(group);
@@ -316,13 +383,19 @@ function suspendSale(kind) {
         saleMessage.textContent = error;
         return;
     }
-    const stored = [...savedSales, { ...draftSale(), kind, id: newRetailId(), savedOn: localDate() }];
+    const sale = { ...draftSale(), kind, id: newRetailId(), savedOn: localDate() };
+    if (kind === 'Held') sale.expiresAt = Date.now() + 3 * hourMs;
+    const stored = [...savedSales, sale];
     if (updateSaleState({ lines: [], discountType: '' }, stored)) {
-        saleMessage.textContent = kind + ' sale saved.';
+        saleMessage.textContent = kind === 'Held' ? 'Sale held for 3 hours.' : kind + ' sale saved.';
     }
 }
 
 function resumeSale(sale) {
+    if (sale.kind === 'Held' && Date.now() >= sale.expiresAt) {
+        renderSavedSales();
+        return;
+    }
     if (cart.size) {
         saleMessage.textContent = 'Clear or hold the current cart before resuming another sale.';
         return;
@@ -333,6 +406,9 @@ function resumeSale(sale) {
     }
 }
 retail('#hold-sale').addEventListener('click', () => suspendSale('Held'));
+setInterval(() => {
+    if (savedSales.some(sale => sale.kind === 'Held' && Date.now() >= sale.expiresAt)) renderSavedSales();
+}, 1000);
 function openSaleReceipt(id, details) {
     retail('#sale-receipt-details').textContent = details;
     retail('#sale-receipt-print-details').textContent = details;
@@ -464,7 +540,6 @@ paymentForm.addEventListener('submit', async event => {
 const customerDialog = retail('#customer-dialog');
 const customerForm = retail('#customer-form');
 const customerSave = retail('#save-customer');
-const customerDelete = retail('#delete-customer');
 const customerMessage = retail('#customer-message');
 const customerSearch = retail('#customer-search');
 const customerStatus = retail('#customer-status');
@@ -518,8 +593,8 @@ function renderCustomers() {
         row.insertCell().append(retailNode('span', 'customer-badge ' + status.toLowerCase(), status));
         const actions = row.insertCell();
         actions.className = 'customer-actions';
-        actions.append(retailButton('◎ View', () => openCustomer('view', index), 'plain'),
-            retailButton('✎ Edit', () => openCustomer('edit', index), 'plain'));
+        actions.append(retailButton('◎ View', () => openCustomer('view', index), 'plain'));
+        if (isStaff) actions.append(retailButton('Request edit', () => openCustomer('edit', index), 'plain'));
     }
     if (!matching.length) appendCell(rows.insertRow(), 'No customers match your search.').colSpan = 6;
     retail('#customer-count').textContent = matching.length ? 'Showing ' + (start + 1) + '–' + Math.min(start + 5, matching.length) + ' of ' + matching.length + ' customers' : 'Showing 0 customers';
@@ -528,42 +603,6 @@ function renderCustomers() {
         renderCustomers();
     });
 }
-
-async function deleteCustomer() {
-    const entry = customerEditEntry;
-    if (isStaff || customerDelete.hidden || customerDelete.disabled || !entry) return;
-    const [name] = entry;
-    const errorLine = retail('#customer-error');
-    errorLine.textContent = '';
-    if (!records.Customers.includes(entry)) {
-        errorLine.textContent = 'The customer list changed. Reopen this form and try again.';
-        return;
-    }
-    if (records.Pets.some(pet => pet[1] === name)) {
-        errorLine.textContent = 'Reassign or remove this customer’s pets before deleting the customer record.';
-        return;
-    }
-    if (!window.confirm('Delete the customer record for ' + name + '?')) return;
-
-    customerDelete.disabled = true;
-    customerSave.disabled = true;
-    try {
-        const customers = records.Customers.filter(customer => customer !== entry);
-        await storeShop(products, { ...records, Customers: customers });
-    } catch (error) {
-        errorLine.textContent = error.message;
-        return;
-    } finally {
-        customerDelete.disabled = false;
-        customerSave.disabled = false;
-    }
-    if (customerEditEntry === entry) customerDialog.close();
-    renderCustomers();
-    refreshDashboard();
-    customerMessage.textContent = 'Customer deleted.';
-}
-
-customerDelete.addEventListener('click', deleteCustomer);
 
 customerSearch.addEventListener('input', () => {
     customerPage = 1;
@@ -577,6 +616,7 @@ retail('#customer-filter').addEventListener('click', applyCustomerFilters);
 customerStatus.addEventListener('change', applyCustomerFilters);
 
 function openCustomer(mode, index = -1) {
+    if (!isStaff && mode !== 'view') return;
     const entry = records.Customers[index];
     const readOnly = mode === 'view';
     customerEditIndex = index;
@@ -591,7 +631,6 @@ function openCustomer(mode, index = -1) {
     });
     customerSave.hidden = readOnly;
     customerSave.textContent = isStaff ? 'Send for Approval' : 'Save Customer';
-    customerDelete.hidden = isStaff || !customerEditEntry;
     customerDialog.showModal();
 }
 retail('#add-customer').addEventListener('click', () => openCustomer('add'));
@@ -677,6 +716,7 @@ function parseCustomerCsv(source) {
 const importDialog = retail('#customer-import');
 const importForm = retail('#import-form');
 retail('#import-customers').addEventListener('click', () => {
+    if (!isStaff) return;
     importForm.reset();
     retail('#import-error').textContent = '';
     importDialog.showModal();

@@ -1,7 +1,7 @@
 <?php
 declare(strict_types=1);
 
-const STAFF_FILE = __DIR__ . '/staff.credentials.php';
+const STAFF_FILE = __DIR__ . '/../staff.credentials.php';
 
 function readStaffAccounts($file): array
 {
@@ -89,8 +89,8 @@ function staffAccountList(array $accounts): array
 
 function handleStaffAccountRequest(string $action): never
 {
-    $admin = $_SESSION['admin'] ?? null;
-    if ($admin === null) {
+    $account = currentAccount();
+    if (!$account || !in_array($account['role'], ['admin', 'super_admin'], true)) {
         authResponse(403, 'Only administrators can manage staff accounts.');
     }
     if ($action === 'list_staff') {
@@ -110,7 +110,9 @@ function handleStaffAccountRequest(string $action): never
             authResponse(422, 'Choose a password of at least 12 characters and at most 72 bytes.');
         }
         validateNewCredentials($username, $password);
-        if (strcasecmp($admin, $username) === 0) {
+        $admin = adminCredentials();
+        if (strcasecmp($account['username'], $username) === 0 ||
+            ($admin && strcasecmp($admin['username'], $username) === 0)) {
             authResponse(409, 'That username is already used.');
         }
     } elseif (!in_array($_POST['active'] ?? '', ['0', '1'], true)) {
@@ -135,6 +137,16 @@ function handleStaffAccountRequest(string $action): never
     [$entry, $accounts] = $database !== null
         ? withDatabaseState($database, 'staff', true, 'fileStaffAccounts', $change)
         : changeStaffFile($create, $change);
+    try {
+        withShopData(true, static function (array &$data) use ($account, $entry, $create): array {
+            $activity = $create ? 'Added staff account ' . $entry['username'] :
+                'Updated staff account ' . $entry['username'] . ' to ' . ($entry['active'] ? 'active' : 'disabled');
+            recordShopAudit($data, $account, 'User Management', $activity . '.');
+            return [];
+        });
+    } catch (RuntimeException | JsonException $error) {
+        error_log('REMS staff account audit: ' . $error->getMessage());
+    }
     authResponse(200, $create ? 'Staff account created.' : ($entry['active'] ? 'Staff account enabled.' : 'Staff account disabled.'), [
         'accounts' => staffAccountList($accounts),
     ]);

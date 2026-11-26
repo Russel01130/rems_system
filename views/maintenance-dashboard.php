@@ -3,7 +3,8 @@ if (empty($isSuperAdmin)) {
     http_response_code(404);
     exit;
 }
-$navigation = ['overview' => ['▦', 'Maintenance Overview']] + MAINTENANCE_MODULES + ['history' => ['◷', 'Maintenance History']];
+$navigation = ['overview' => ['▦', 'Maintenance Overview'], 'history' => ['◷', 'Maintenance History'],
+    'users' => ['♙', 'User Management'], 'audit' => ['≡', 'Audit Logs']];
 $selected = $_GET['maintenance'] ?? 'overview';
 if (!is_string($selected) || !isset($navigation[$selected])) $selected = 'overview';
 $formatChangeTime = static fn(string $date): string =>
@@ -12,7 +13,7 @@ $formatChangeTime = static fn(string $date): string =>
 <div id="admin" data-role="super_admin">
     <aside class="sidebar">
         <div class="admin-brand"><span aria-hidden="true">⌂<i>🐾</i></span><div><strong>Rem’s</strong><small>Pet Supplies &amp;<br>Accessories Shop</small></div></div>
-        <nav aria-label="Maintenance navigation">
+        <nav aria-label="Super Admin navigation">
             <form method="get">
                 <?php foreach ($navigation as $key => [$icon, $label]): ?>
                 <button type="submit" name="maintenance" value="<?= $key ?>" <?= $selected === $key ? 'aria-current="page"' : '' ?>>
@@ -34,16 +35,27 @@ $formatChangeTime = static fn(string $date): string =>
         </header>
         <?php if ($selected === 'overview'): ?>
         <h1>Maintenance Overview</h1>
-        <p class="subtitle">Check module status and the most recent change for each control. Times are shown in Manila time.</p>
+        <p class="subtitle">Enter a reason, then select a module’s maintenance button to switch it on or off. Times are shown in Manila time.</p>
+        <p id="system-maintenance-note" class="maintenance-notice" role="status" <?= $maintenanceEnabled ? '' : 'hidden' ?>>System-wide maintenance is on and takes priority over individual module settings.</p>
         <div class="maintenance-list">
             <?php foreach (MAINTENANCE_MODULES as $key => [, $label]): $status = $maintenance[$key]; ?>
-            <a class="maintenance-tile" href="?maintenance=<?= $key ?>">
+            <form class="maintenance-tile" method="post" aria-label="<?= $label ?> maintenance control">
                 <strong><?= $label ?></strong>
-                <span class="maintenance-badge" data-paused="<?= $status['enabled'] ? 'true' : 'false' ?>"><?= $status['enabled'] ? 'Maintenance on' : 'Maintenance off' ?></span>
-                <small><?= $status['changedAt'] ? 'Last changed ' . $formatChangeTime($status['changedAt']) : 'No changes yet' ?></small>
-            </a>
+                <input type="hidden" name="csrf" value="<?= $authToken ?>">
+                <input type="hidden" name="action" value="set_maintenance">
+                <input type="hidden" name="module" value="<?= $key ?>">
+                <button type="submit" class="maintenance-badge maintenance-toggle" name="enabled" value="<?= $status['enabled'] ? '0' : '1' ?>"
+                    data-paused="<?= $status['enabled'] ? 'true' : 'false' ?>" role="switch" aria-checked="<?= $status['enabled'] ? 'true' : 'false' ?>"
+                    aria-label="<?= $label ?> maintenance"><?= $status['enabled'] ? 'Maintenance on' : 'Maintenance off' ?></button>
+                <label class="maintenance-reason">Reason (required)
+                    <textarea name="reason" maxlength="240" rows="2" required></textarea>
+                </label>
+                <small class="maintenance-last-change"><?= $status['changedAt'] ? 'Last changed ' . $formatChangeTime($status['changedAt']) : 'No changes yet' ?></small>
+                <p class="maintenance-feedback" role="status"></p>
+            </form>
             <?php endforeach; ?>
         </div>
+        <script src="assets/js/maintenance.js?v=<?= filemtime(__DIR__ . '/../assets/js/maintenance.js') ?>" defer></script>
         <?php elseif ($selected === 'history'): ?>
         <h1>Maintenance History</h1>
         <p class="subtitle">Changes appear newest first. Times are shown in Manila time.</p>
@@ -91,31 +103,10 @@ $formatChangeTime = static fn(string $date): string =>
         </nav>
         <?php endif; ?>
         <?php endif; ?>
-        <?php else: ?>
-        <?php [, $label, $description] = MAINTENANCE_MODULES[$selected]; $status = $maintenance[$selected]; ?>
-        <h1><?= $label ?> Maintenance</h1>
-        <p class="subtitle"><?= $description ?></p>
-        <?php if ($maintenanceEnabled && $selected !== 'system'): ?>
-        <p class="maintenance-notice">System-wide maintenance is on and takes priority over this setting.</p>
-        <?php endif; ?>
-        <form class="maintenance-card maintenance-control" method="post" aria-label="<?= $label ?> maintenance control">
-            <div>
-                <h2>Maintenance mode</h2>
-                <p><?= $status['enabled'] ? 'On' : 'Off' ?></p>
-                <?php if ($status['changedAt']): ?>
-                <small>Last changed <?= $formatChangeTime($status['changedAt']) ?> Manila time
-                    <?= isset($status['changedBy']) ? 'by ' . htmlspecialchars($status['changedBy'], ENT_QUOTES, 'UTF-8') : '' ?></small>
-                <?php endif; ?>
-            </div>
-            <input type="hidden" name="csrf" value="<?= $authToken ?>">
-            <input type="hidden" name="action" value="set_maintenance">
-            <input type="hidden" name="module" value="<?= $selected ?>">
-            <label class="maintenance-reason">Reason for this change (optional)
-                <textarea name="reason" maxlength="240" rows="2"></textarea>
-            </label>
-            <button class="maintenance-switch" type="submit" name="enabled" value="<?= $status['enabled'] ? '0' : '1' ?>"
-                role="switch" aria-checked="<?= $status['enabled'] ? 'true' : 'false' ?>" aria-label="<?= $label ?> maintenance mode"></button>
-        </form>
+        <?php elseif ($selected === 'users'): ?>
+        <?php require __DIR__ . '/super-admin-users.php'; ?>
+        <?php elseif ($selected === 'audit'): ?>
+        <?php require __DIR__ . '/super-admin-audit.php'; ?>
         <?php endif; ?>
     </main>
 </div>

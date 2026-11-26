@@ -1,8 +1,8 @@
 ﻿const customerManagement = retail('#customer-management');
-const customerManagementMessage = retail('#customer-management-status');
+const customerManagementMessage = retail(isStaff ? '#reservation-status' : '#customer-management-status');
 let customerManagementBusy = false;
 
-function renderCustomerManagement({ accounts, orders }) {
+function renderCustomerAccounts(accounts) {
     const accountList = retail('#customer-account-list');
     accountList.replaceChildren();
     for (const account of accounts) {
@@ -13,7 +13,9 @@ function renderCustomerManagement({ accounts, orders }) {
         accountList.append(row);
     }
     if (!accounts.length) accountList.append(retailNode('p', 'retail-empty', 'No customer accounts yet.'));
+}
 
+function renderReservations(orders) {
     const orderList = retail('#customer-order-list');
     orderList.replaceChildren();
     for (const order of orders) {
@@ -38,9 +40,11 @@ function renderCustomerManagement({ accounts, orders }) {
 async function refreshCustomerManagement() {
     if (customerManagementBusy) return;
     customerManagementBusy = true;
-    customerManagementMessage.textContent = 'Loading customer accounts and orders…';
+    customerManagementMessage.textContent = isStaff ? 'Loading reservations…' : 'Loading customer accounts…';
     try {
-        renderCustomerManagement(await shopRequest('customer_admin_list'));
+        const result = await shopRequest(isStaff ? 'customer_order_list' : 'customer_admin_list');
+        if (isStaff) renderReservations(result.orders);
+        else renderCustomerAccounts(result.accounts);
         customerManagementMessage.textContent = '';
     } catch (error) {
         customerManagementMessage.textContent = error.message;
@@ -56,7 +60,7 @@ async function updateCustomerOrder(id, status) {
     customerManagementBusy = true;
     try {
         const result = await shopRequest('customer_order_status', { id, status });
-        renderCustomerManagement(result);
+        renderReservations(result.orders);
         customerManagementMessage.textContent = result.notice;
         acceptShop(await shopRequest('shop_read'));
         refreshDashboard();
@@ -67,8 +71,9 @@ async function updateCustomerOrder(id, status) {
     }
 }
 
-retail('#refresh-customer-management').addEventListener('click', refreshCustomerManagement);
+retail(isStaff ? '#refresh-reservations' : '#refresh-customer-management').addEventListener('click', refreshCustomerManagement);
 document.addEventListener('rems:section', event => {
-    customerManagement.hidden = event.detail !== 'User Management';
-    if (!customerManagement.hidden) refreshCustomerManagement();
+    const open = event.detail === (isStaff ? 'Reservation' : 'User Management');
+    if (customerManagement) customerManagement.hidden = !open;
+    if (open) refreshCustomerManagement();
 });

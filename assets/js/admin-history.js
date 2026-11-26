@@ -3,9 +3,7 @@ const historyTime = new Intl.DateTimeFormat('en-PH', { dateStyle: 'medium', time
 const historyRoles = { admin: 'Administrator', staff: 'Staff', customer: 'Customer', super_admin: 'Super Admin', system: 'System' };
 const transactionFilters = retail('#admin-transactions .history-filters');
 const auditFilters = retail('#admin-audit .history-filters');
-const bookingSearch = retail('#admin-booking .history-search');
 const auditMessage = retail('#audit-history-message');
-let bookingPage = 1;
 let transactionPage = 1;
 let auditRequest = 0;
 let auditSearchTimer;
@@ -112,19 +110,6 @@ function csvHistory(filename, columns, rows) {
     setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-function renderBookingHistory() {
-    const query = bookingSearch.value.trim().toLowerCase();
-    const entries = (records[scheduleName] ?? []).filter(booking => booking[7])
-        .sort((a, b) => (b[2] + b[3]).localeCompare(a[2] + a[3]))
-        .map(([pet, service, date, time, status, , id, customer]) =>
-            [id, customer, pet, service, formatDay(date), time, status || 'Scheduled'])
-        .filter(row => row.some(value => String(value ?? '').toLowerCase().includes(query)));
-    bookingPage = renderHistoryList('booking', entries, bookingPage, row => row, next => {
-        bookingPage = next;
-        renderBookingHistory();
-    });
-}
-
 function transactionHistoryRows() {
     const sales = (records.Reports ?? []).map(([ref, customer, date, items, total]) => {
         const saved = transactionDetails[ref];
@@ -150,7 +135,7 @@ function transactionHistoryValues(entry) {
 }
 
 function filteredTransactions(rows) {
-    const { query, type, status, processedBy, range } = historyValues(transactionFilters);
+    const { query, type, status, range } = historyValues(transactionFilters);
     const today = localDate();
     const inRange = date => {
         if (range === 'today') return date === today;
@@ -163,13 +148,13 @@ function filteredTransactions(rows) {
     };
     const search = query.toLowerCase();
     return rows.filter(entry => (!type || entry.type === type) && (!status || entry.status === status) &&
-        (!processedBy || entry.processedBy === processedBy) && inRange(entry.date) &&
+        inRange(entry.date) &&
         transactionHistoryValues(entry).some(value => String(value ?? '').toLowerCase().includes(search)));
 }
 
 function renderTransactionHistory() {
     const rows = transactionHistoryRows();
-    for (const key of ['type', 'status', 'processedBy']) setHistoryChoices(transactionFilters.elements[key], rows.map(entry => entry[key]));
+    for (const key of ['type', 'status']) setHistoryChoices(transactionFilters.elements[key], rows.map(entry => entry[key]));
     const today = localDate();
     const paidToday = rows.filter(entry => entry.date === today && entry.total !== null);
     setHistoryMetrics('transactions', [rows.length, paidToday.filter(entry => entry.type === 'Product Sale').length,
@@ -204,7 +189,8 @@ async function loadAuditLog(page = 1) {
         const log = await shopRequest('audit_read', { ...historyValues(auditFilters), page });
         if (request !== auditRequest) return;
         for (const key of ['role', 'area', 'event']) {
-            setHistoryChoices(auditFilters.elements[key], log.facets[key], key === 'role' ? historyRoles : {});
+            const choices = key === 'event' ? log.facets[key].filter(event => event !== 'Changed maintenance') : log.facets[key];
+            setHistoryChoices(auditFilters.elements[key], choices, key === 'role' ? historyRoles : {});
         }
         setHistoryMetrics('audit', [log.summary.today, log.summary.logins, log.summary.critical, log.summary.admins]);
         renderHistoryRows('audit', log.entries.map(entry => {
@@ -222,7 +208,6 @@ async function loadAuditLog(page = 1) {
     }
 }
 
-bookingSearch.addEventListener('input', () => { bookingPage = 1; renderBookingHistory(); });
 function applyTransactionFilters() { transactionPage = 1; renderTransactionHistory(); }
 transactionFilters.addEventListener('submit', event => { event.preventDefault(); applyTransactionFilters(); });
 transactionFilters.addEventListener('input', applyTransactionFilters);
@@ -262,10 +247,8 @@ retail('#export-transactions-pdf').addEventListener('click', () => {
 });
 document.addEventListener('rems:section', event => {
     if (event.detail === 'Audit Logs') loadAuditLog();
-    if (event.detail === 'Booking') renderBookingHistory();
     if (event.detail === 'Transaction History') renderTransactionHistory();
 });
 document.addEventListener('rems:shop-updated', () => {
-    if (admin.dataset.page === 'Booking') renderBookingHistory();
     if (admin.dataset.page === 'Transaction History') renderTransactionHistory();
 });

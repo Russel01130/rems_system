@@ -44,9 +44,10 @@ const photoError = document.querySelector('#product-error');
 const removePhoto = document.querySelector('#remove-product-photo');
 
 let previousAdminPage = 'Dashboard';
-const adminHistoryPages = ['Booking', 'Transaction History', 'Audit Logs'];
+const adminHistoryPages = ['Transaction History', 'Audit Logs'];
 
 function showSection(name) {
+    if (admin.dataset.role === 'admin' && ['Point of Sale', 'Booking', 'Reservation', 'Pets', 'Grooming & Pet Hotel'].includes(name)) return;
     if (admin.dataset.role === 'staff' && ['Reports', 'User Management', ...adminHistoryPages].includes(name)) return;
     const currentPage = admin.dataset.page;
     if (name === 'Settings' && currentPage && currentPage !== 'Settings') previousAdminPage = currentPage;
@@ -54,12 +55,14 @@ function showSection(name) {
     document.querySelector('#profile-settings').hidden = name !== 'Settings';
     document.querySelector('#dashboard').hidden = name !== 'Dashboard';
     document.querySelector('#inventory').hidden = name !== 'Inventory';
-    document.querySelector('#operations').hidden = ['Dashboard', 'Inventory', 'Point of Sale', 'Customers', 'Settings', 'Requests', ...adminHistoryPages].includes(name);
+    document.querySelector('#operations').hidden = ['Dashboard', 'Inventory', 'Point of Sale', 'Customers', 'Settings', 'Requests', 'Reservation', ...adminHistoryPages].includes(name);
+    const reservationPage = document.querySelector('#reservation-page');
+    if (reservationPage) reservationPage.hidden = name !== 'Reservation';
     document.querySelectorAll('[data-admin-history]').forEach(section => { section.hidden = section.dataset.adminHistory !== name; });
     document.querySelector('#pos').hidden = name !== 'Point of Sale';
     document.querySelector('#customers-page').hidden = name !== 'Customers';
     const modules = { Inventory: ['inventory', '#inventory'], 'Point of Sale': ['pos', '#pos'],
-        'Grooming & Pet Hotel': ['booking', '#operations'] };
+        Booking: ['booking', '#operations'], 'Grooming & Pet Hotel': ['booking', '#operations'] };
     const module = modules[name];
     const paused = module && JSON.parse(admin.dataset.pausedModules).includes(module[0]);
     const maintenanceNotice = document.querySelector('#shop-maintenance-notice');
@@ -272,16 +275,16 @@ function renderProducts() {
         badge.textContent = '● ' + stockStatusLabels[status];
         appendCell(row, '').append(badge);
         const actions = appendCell(row, '');
-        for (const [label, mode] of [['◉ View', 'view'], ['♢ Edit', 'edit']]) {
+        for (const [label, mode] of isStaff ? [['◉ View', 'view']] : [['◉ View', 'view'], ['Edit', 'edit']]) {
             const button = document.createElement('button');
             button.className = mode === 'edit' ? 'row-action row-action-edit' : 'row-action';
-            button.textContent = isStaff && mode === 'edit' ? 'Request edit' : label;
+            button.textContent = label;
             button.addEventListener('click', () => openProduct(mode, index));
             actions.append(button);
         }
         if (!isStaff) {
             const remove = retailButton('Delete', () => deleteProduct(product, remove), 'row-action row-action-delete');
-            remove.setAttribute('aria-label', 'Delete ' + productLabel(product) + ' (' + group + ')');
+            remove.setAttribute('aria-label', 'Delete ' + productLabel(product));
             actions.append(remove);
         }
     });
@@ -368,28 +371,24 @@ function resetPage() {
 }
 
 async function deleteProduct(product, button) {
-    const group = product[1];
     const name = productLabel(product);
-    inventoryMessage.textContent = '';
-    if (!window.confirm('Delete ' + name + ' (' + group + ') from inventory?')) return;
+    if (!window.confirm('Delete ' + name + ' from inventory?')) return;
     if (!products.includes(product)) {
         renderProducts();
         inventoryMessage.textContent = 'The product list changed. Select the product again.';
         return;
     }
-
     button.disabled = true;
+    inventoryMessage.textContent = '';
     try {
         await storeShop(products.filter(entry => entry !== product), records);
+        renderProducts();
+        refreshDashboard();
+        inventoryMessage.textContent = 'Deleted ' + name + '.';
     } catch (error) {
         inventoryMessage.textContent = error.message;
-        return;
-    } finally {
         button.disabled = false;
     }
-    renderProducts();
-    refreshDashboard();
-    inventoryMessage.textContent = 'Deleted ' + name + ' (' + group + ').';
 }
 
 search.addEventListener('input', resetPage);
@@ -400,6 +399,7 @@ filter.addEventListener('click', () => {
 });
 
 function openProduct(mode, index = -1) {
+    if (isStaff && mode !== 'view') return;
     productIndex = index;
     const product = products[index];
     const specs = product?.[8];
@@ -428,7 +428,7 @@ function openProduct(mode, index = -1) {
     unitPriceBasis = specs?.pricingBasis ?? enteredUnitPrice(specs?.unit, product?.[2]);
     const submit = productForm.querySelector('button:not([type="button"])');
     submit.hidden = readOnly;
-    submit.textContent = isStaff ? 'Send for Approval' : 'Save Product';
+    submit.textContent = 'Save Product';
     productDialog.showModal();
 }
 
@@ -437,23 +437,6 @@ function updatePhotoPreview(readOnly = false) {
     removePhoto.hidden = readOnly || !productPhoto;
     if (productPhoto) photoPreview.src = productPhoto;
     else photoPreview.removeAttribute('src');
-}
-
-async function prepareRecordPhoto(file) {
-    if (!['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(file.type) || file.size > 10 * 1024 * 1024) {
-        throw new Error('Choose a JPG, PNG, WebP, or GIF up to 10 MB.');
-    }
-    const picture = await createImageBitmap(file);
-    try {
-        const scale = Math.min(1, 480 / Math.max(picture.width, picture.height));
-        const canvas = document.createElement('canvas');
-        canvas.width = Math.max(1, Math.round(picture.width * scale));
-        canvas.height = Math.max(1, Math.round(picture.height * scale));
-        canvas.getContext('2d').drawImage(picture, 0, 0, canvas.width, canvas.height);
-        return canvas.toDataURL('image/webp', 0.82);
-    } finally {
-        picture.close();
-    }
 }
 
 function validMoney(value) {
@@ -502,6 +485,7 @@ removePhoto.addEventListener('click', () => {
 document.querySelector('#add-product').addEventListener('click', () => openProduct('add'));
 productForm.addEventListener('submit', async event => {
     event.preventDefault();
+    if (isStaff) return;
     if (pendingPhoto) {
         photoError.textContent = 'Wait for the picture preview before saving.';
         return;
@@ -542,18 +526,14 @@ productForm.addEventListener('submit', async event => {
     if (productIndex === -1) next.unshift(product);
     else next[productIndex] = product;
     try {
-        if (isStaff) await sendShopRequest(productIndex === -1 ? 'product_add' : 'product_edit', { before: products[productIndex], entry: product });
-        else await storeShop(next, records);
+        await storeShop(next, records);
     } catch (error) {
         photoError.textContent = error.message;
         return;
     }
     productDialog.close();
-    if (isStaff) showSection('Requests');
-    else {
-        refreshDashboard();
-        resetPage();
-    }
+    refreshDashboard();
+    resetPage();
 });
 
 const itemBarcodePreview = document.querySelector('#inventory-item-barcode');
@@ -568,6 +548,7 @@ itemForm.elements.productId.addEventListener('change', () => {
 });
 
 document.querySelector('#add-item').addEventListener('click', () => {
+    if (isStaff) return;
     itemForm.reset();
     itemForm.elements.productId.replaceChildren(new Option('Choose a product', ''), ...products.map(product =>
         new Option(productLabel(product) + ' · ' + product[1], product[6])));
@@ -579,7 +560,7 @@ document.querySelector('#add-item').addEventListener('click', () => {
 
 itemForm.addEventListener('submit', async event => {
     event.preventDefault();
-    if (itemSave.disabled) return;
+    if (isStaff || itemSave.disabled) return;
     const index = products.findIndex(entry => entry[6] === itemForm.elements.productId.value);
     const before = products[index];
     const barcode = itemForm.elements.itemBarcode.value;
@@ -592,12 +573,9 @@ itemForm.addEventListener('submit', async event => {
     updated[8] = { ...before[8], itemBarcodes: [...(before[8]?.itemBarcodes ?? []), barcode] };
     itemSave.disabled = true;
     try {
-        if (isStaff) await sendShopRequest('product_edit', { before, entry: updated });
-        else {
-            const next = [...products];
-            next[index] = updated;
-            await storeShop(next, records);
-        }
+        const next = [...products];
+        next[index] = updated;
+        await storeShop(next, records);
     } catch (error) {
         itemError.textContent = error.message;
         return;
@@ -605,8 +583,7 @@ itemForm.addEventListener('submit', async event => {
         itemSave.disabled = false;
     }
     itemDialog.close();
-    if (isStaff) showSection('Requests');
-    else inventoryMessage.textContent = 'Item added for ' + productLabel(before) + '. Barcode ' + barcode + '.';
+    inventoryMessage.textContent = 'Item added for ' + productLabel(before) + '. Barcode ' + barcode + '.';
 });
 const profileMenu = document.querySelector('#profile-menu');
 const profileTrigger = profileMenu.querySelector('summary');
@@ -664,7 +641,7 @@ const displayNameInput = document.querySelector('#profile-display-name');
 const profileName = profileTrigger.querySelector('.profile-name');
 const profileSaveStatus = document.querySelector('#profile-save-status');
 const displayNameKey = admin.dataset.role === 'staff' ? 'rems-display-name:' + admin.dataset.username : 'rems-display-name';
-const defaultDisplayName = admin.dataset.role === 'staff' ? admin.dataset.username : 'System Administrator';
+const defaultDisplayName = profileName.textContent;
 
 function showDisplayName(name) {
     profileName.textContent = name;
@@ -675,6 +652,9 @@ function showDisplayName(name) {
 let displayName = defaultDisplayName;
 try {
     displayName = localStorage.getItem(displayNameKey) || defaultDisplayName;
+    if (admin.dataset.role === 'admin' && ['System Administrator', 'Admin Dashboard'].includes(displayName)) {
+        displayName = defaultDisplayName;
+    }
 } catch {
     // Use the default name when storage is unavailable.
 }

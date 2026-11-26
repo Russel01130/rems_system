@@ -10,13 +10,30 @@ if (empty($isCustomer)) {
         <nav aria-label="Customer navigation">
             <button type="button" data-portal-page="shop" aria-current="page">Shop</button>
             <button type="button" data-portal-page="booking">Book a Visit</button>
+            <button type="button" data-portal-page="pets">Pet Management</button>
             <button type="button" data-portal-page="history">My Activity</button>
         </nav>
-        <form method="post">
-            <input type="hidden" name="action" value="logout">
-            <input type="hidden" name="csrf" value="<?= $authToken ?>">
-            <button class="filter" type="submit">Logout</button>
-        </form>
+        <div class="portal-header-actions">
+            <details id="portal-notifications" class="portal-notifications">
+                <summary class="filter" aria-label="Appointment notifications">
+                    <span aria-hidden="true">&#128276;</span>
+                    <span class="portal-notification-count" id="portal-notification-count" hidden></span>
+                </summary>
+                <section class="portal-card portal-notification-panel" aria-labelledby="portal-booking-notices-title">
+                    <header>
+                        <h2 id="portal-booking-notices-title">Notifications</h2>
+                        <button type="button" class="link" id="portal-notification-read" disabled>Mark all as read</button>
+                    </header>
+                    <ul id="portal-booking-notice-list"></ul>
+                    <p id="portal-notification-status" class="portal-help" role="status"></p>
+                </section>
+            </details>
+            <form method="post">
+                <input type="hidden" name="action" value="logout">
+                <input type="hidden" name="csrf" value="<?= $authToken ?>">
+                <button class="filter" type="submit">Logout</button>
+            </form>
+        </div>
     </header>
     <main class="portal-content">
         <p class="portal-status" id="portal-status" role="status"></p>
@@ -55,14 +72,35 @@ if (empty($isCustomer)) {
                 <article class="portal-card">
                     <h2>Your Appointment</h2>
                     <form class="portal-booking-form" id="portal-booking-form">
-                        <label>Service<select name="service"><option>Grooming</option><option>Pet Hotel Check-in</option></select></label>
-                        <label>Pet name<input name="pet" list="portal-pets" maxlength="100" required><datalist id="portal-pets"></datalist></label>
-                        <label>Species<select name="species"><option>Dog</option><option>Cat</option><option>Bird</option><option>Rabbit</option><option>Other</option></select></label>
+                        <label class="retail-select-picker retail-select-service"><span>Service</span><select name="service" aria-label="Service"><option>Grooming</option><option>Pet Hotel Check-in</option></select></label>
+                        <label class="retail-select-picker retail-select-pet"><span>Pet name</span><select name="pet" aria-label="Pet name" required><option value="">Choose your pet</option></select></label>
+                        <p class="portal-help" id="booking-pet-help" hidden>Register a pet in Pet Management before booking an appointment.</p>
+                        <div id="booking-pet-details" aria-live="polite" hidden></div>
                         <p id="booking-selected-date">Choose a date to see available times.</p>
                         <div id="booking-slots" class="booking-slots" aria-label="Appointment times"></div>
-                        <button class="primary" id="portal-book" disabled>Confirm Appointment</button>
+                        <button class="primary" id="portal-book" disabled>Request Appointment</button>
                     </form>
                 </article>
+            </div>
+        </section>
+        <section id="portal-pet-management" aria-labelledby="portal-pet-title" hidden>
+            <div class="portal-heading"><h1 id="portal-pet-title">Pet Management</h1></div>
+            <div class="portal-booking-grid">
+                <article class="portal-card">
+                    <h2>Register a Pet</h2>
+                    <form class="portal-booking-form" id="portal-pet-form">
+                        <label>Pet name<input name="name" maxlength="100" required></label>
+                        <label class="retail-select-picker retail-select-species"><span>Species</span><select name="species" aria-label="Species" required>
+                            <option value="">Choose a species</option>
+                            <?php foreach (CUSTOMER_PET_SPECIES as $species): ?><option><?= $species ?></option><?php endforeach; ?>
+                        </select></label>
+                        <label>Breed<input name="breed" maxlength="100" required></label>
+                        <label>Marking<input name="marking" maxlength="100" placeholder="e.g. White patch on chest or None" required></label>
+                        <label>Picture of pet<input name="photo" type="file" accept="image/jpeg,image/png,image/webp,image/gif" required></label>
+                        <button type="submit" class="primary">Register</button>
+                    </form>
+                </article>
+                <article class="portal-card"><h2>My Pets</h2><div id="portal-registered-pets"></div></article>
             </div>
         </section>
         <section id="portal-history" aria-labelledby="portal-history-title" hidden>

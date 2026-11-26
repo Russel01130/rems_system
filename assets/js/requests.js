@@ -24,11 +24,20 @@ async function shopRequest(action, fields = {}) {
     return data;
 }
 
+function updateBookingCount(count) {
+    const badge = retail('#booking-nav-count');
+    if (!badge) return;
+    badge.hidden = !count;
+    badge.textContent = count || '';
+    badge.setAttribute('aria-label', count + ' pending appointment requests');
+}
+
 function acceptShop(data) {
     if (shopRevision !== null && data.revision < shopRevision) return;
     shopRevision = data.revision;
     admin.dataset.pausedModules = JSON.stringify(data.pausedModules ?? []);
     shopRequests = data.requests;
+    updateBookingCount(data.pendingBookings);
     saleReceiptIds = new Set(data.saleReceiptIds ?? []);
     transactionDetails = data.transactionDetails ?? {};
     updateRequestSummary(requestSummary(shopRequests));
@@ -286,11 +295,11 @@ function requestSummary(requests) {
 function updateRequestSummary(summary) {
     if (displayedSummaryKey === summary.key) return;
     displayedSummaryKey = summary.key;
+    if (isStaff) return;
     const badge = retail('#request-nav-count');
     badge.hidden = !summary.pending;
     badge.textContent = summary.pending;
     badge.setAttribute('aria-label', summary.pending + ' pending');
-    if (isStaff) return;
     retail('#dashboard-approval-count').textContent = summary.pending === 0
         ? 'No staff requests awaiting review.'
         : summary.pending + (summary.pending === 1 ? ' request awaiting review' : ' requests awaiting review');
@@ -383,6 +392,7 @@ async function checkRequestStatus() {
         const summary = await shopRequest('shop_status');
         if (decisionInFlight) return;
         updateRequestSummary(summary);
+        updateBookingCount(summary.pendingBookings);
         if (admin.dataset.page === 'Requests' && summary.key !== renderedRequestKey) {
             await refreshRequests(true);
         } else if (admin.dataset.page !== 'Requests' && shopRevision !== null &&
@@ -400,7 +410,7 @@ async function checkRequestStatus() {
             if (page === 'Inventory') renderProducts();
             else if (page === 'Customers') renderCustomers();
             else if (page === 'Point of Sale') { renderCategories(); refreshSale(); }
-            else if (['Pets', scheduleName, 'Reports', staffName].includes(page)) renderOperation();
+            else if (['Pets', 'Booking', scheduleName, 'Reports', staffName].includes(page)) renderOperation();
         }
     } catch {
         if (!isStaff && displayedSummaryKey === undefined) {
@@ -421,7 +431,6 @@ document.addEventListener('rems:section', event => {
     }
 });
 if (isStaff) {
-    retail('#add-product').textContent = 'Request New Product';
     retail('#add-customer').textContent = 'Request New Customer';
     retail('#import-customers').textContent = 'Request CSV Import';
 }

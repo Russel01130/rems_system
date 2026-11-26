@@ -1,5 +1,5 @@
 <?php
-require_once __DIR__ . '/admin-auth.php';
+require_once __DIR__ . '/includes/admin-auth.php';
 startAdminSession();
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
     handleAdminRequest();
@@ -21,6 +21,7 @@ $pausedModules = htmlspecialchars(json_encode(pausedModules($maintenance), JSON_
 $showShop = $signedIn && !$isSuperAdmin && !$maintenanceEnabled;
 if ($maintenanceEnabled && !$isSuperAdmin) http_response_code(503);
 $dashboardTitle = $isAdmin ? 'Admin Dashboard' : 'Staff Dashboard';
+$profileLabel = htmlspecialchars($isAdmin ? 'Admin' : ($account['username'] ?? ''), ENT_QUOTES, 'UTF-8');
 $needsSetup = false;
 $authUnavailable = false;
 if (!$signedIn && !$maintenanceEnabled) {
@@ -39,11 +40,35 @@ $products = [
     ['Dog Chew Toy', 'Toys', 95, 0, '🦴'],
     ['Cat litter 5kg', 'Hygiene', 325, 18, '🛍️'],
 ];
-$adminPages = ['Booking', 'Transaction History', 'Audit Logs', 'Reports', 'User Management'];
+$adminPages = ['Transaction History', 'Audit Logs', 'Reports', 'User Management'];
+$staffPages = ['Point of Sale', 'Booking', 'Reservation', 'Grooming & Pet Hotel'];
+$staffHiddenTabs = [...$adminPages, 'Inventory', 'Customers', 'Pets'];
 $navigation = ['▦ Dashboard', '◎ Inventory', '🛒 Point of Sale', '♙ Customers', '♧ Pets', '⌂ Grooming & Pet Hotel',
-    '▣ Booking', '≡ Transaction History', '◷ Audit Logs', '▥ Reports', '♙ User Management'];
+    '▣ Booking', '▤ Reservation', '≡ Transaction History', '◷ Audit Logs', '▥ Reports', '♙ User Management'];
 function logo() {
     return '<div class="logo" aria-label="Rem’s Pet Supplies and Accessories Shop"><span class="logo-house">⌂</span><div><strong>Rem’s</strong><small><b>&amp;</b> Pet Supplies<br>Accessories Shop</small><em>Quality goodies for your furbabies!</em></div></div>';
+}
+function salesPicker(string $id): void {
+    ?>
+    <div class="sales-picker-field">
+        <span id="<?= $id ?>-label">Product or service</span>
+        <details class="sales-picker">
+            <summary class="filter" aria-labelledby="<?= $id ?>-label <?= $id ?>-selection">
+                <span id="<?= $id ?>-selection">All products</span>
+            </summary>
+            <input type="hidden" id="<?= $id ?>" value="">
+            <div class="sales-picker-options">
+                <button type="button" data-sales-choice="service:Grooming">Grooming</button>
+                <button type="button" data-sales-choice="service:Pet Hotel Check-in">Pet Hotel</button>
+                <details class="sales-picker-products">
+                    <summary>Product</summary>
+                    <button type="button" data-sales-choice="">All products</button>
+                    <div class="sales-picker-items"></div>
+                </details>
+            </div>
+        </details>
+    </div>
+    <?php
 }
 ?>
 <!doctype html>
@@ -52,29 +77,36 @@ function logo() {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Rem’s Pet Supplies &amp; Accessories Shop</title>
-<link rel="stylesheet" href="style.css?v=<?= filemtime(__DIR__ . '/style.css') ?>">
-<link rel="stylesheet" href="retail.css?v=<?= filemtime(__DIR__ . '/retail.css') ?>">
+<link rel="stylesheet" href="assets/css/style.css?v=<?= filemtime(__DIR__ . '/assets/css/style.css') ?>">
+<link rel="stylesheet" href="assets/css/retail.css?v=<?= filemtime(__DIR__ . '/assets/css/retail.css') ?>">
+<?php if ($showShop): ?>
+<script src="assets/js/record-photo.js?v=<?= filemtime(__DIR__ . '/assets/js/record-photo.js') ?>" defer></script>
+<script src="assets/js/catalog-variants.js?v=<?= filemtime(__DIR__ . '/assets/js/catalog-variants.js') ?>" defer></script>
+<?php endif; ?>
 <?php if ($showShop && ($isAdmin || $isCustomer)): ?>
 <script src="assets/vendor/jspdf-4.2.1.umd.min.js" defer></script>
-<script src="receipt-pdf.js?v=<?= filemtime(__DIR__ . '/receipt-pdf.js') ?>" defer></script>
+<script src="assets/js/receipt-pdf.js?v=<?= filemtime(__DIR__ . '/assets/js/receipt-pdf.js') ?>" defer></script>
 <?php endif; ?>
 <?php if ($showShop && $isCustomer): ?>
-<link rel="stylesheet" href="customer.css?v=<?= filemtime(__DIR__ . '/customer.css') ?>">
-<script src="customer.js?v=<?= filemtime(__DIR__ . '/customer.js') ?>" defer></script>
+<link rel="stylesheet" href="assets/css/customer.css?v=<?= filemtime(__DIR__ . '/assets/css/customer.css') ?>">
+<script src="assets/js/customer.js?v=<?= filemtime(__DIR__ . '/assets/js/customer.js') ?>" defer></script>
 <?php elseif ($showShop): ?>
-<script src="app.js?v=<?= filemtime(__DIR__ . '/app.js') ?>" defer></script>
-<script src="operations.js?v=<?= filemtime(__DIR__ . '/operations.js') ?>" defer></script>
-<script src="retail.js?v=<?= filemtime(__DIR__ . '/retail.js') ?>" defer></script>
-<script src="requests.js?v=<?= filemtime(__DIR__ . '/requests.js') ?>" defer></script>
-<?php if ($isAdmin): ?><script src="staff.js" defer></script><script src="customer-admin.js" defer></script>
-<script src="admin-history.js?v=<?= filemtime(__DIR__ . '/admin-history.js') ?>" defer></script><?php endif; ?>
+<script src="assets/js/app.js?v=<?= filemtime(__DIR__ . '/assets/js/app.js') ?>" defer></script>
+<script src="assets/js/operations.js?v=<?= filemtime(__DIR__ . '/assets/js/operations.js') ?>" defer></script>
+<script src="assets/js/retail.js?v=<?= filemtime(__DIR__ . '/assets/js/retail.js') ?>" defer></script>
+<script src="assets/js/requests.js?v=<?= filemtime(__DIR__ . '/assets/js/requests.js') ?>" defer></script>
+<script src="assets/js/customer-admin.js?v=<?= filemtime(__DIR__ . '/assets/js/customer-admin.js') ?>" defer></script>
+<?php if ($isAdmin): ?><script src="assets/js/staff.js" defer></script>
+<script src="assets/js/admin-history.js?v=<?= filemtime(__DIR__ . '/assets/js/admin-history.js') ?>" defer></script><?php endif; ?>
+<?php elseif ($isSuperAdmin && ($_GET['maintenance'] ?? '') === 'users'): ?>
+<script src="assets/js/staff.js?v=<?= filemtime(__DIR__ . '/assets/js/staff.js') ?>" defer></script>
 <?php elseif (!$signedIn): ?>
-<script src="sign-in.js" defer></script>
+<script src="assets/js/sign-in.js" defer></script>
 <?php endif; ?>
 </head>
 <body>
 <?php if ($isSuperAdmin): ?>
-<?php require __DIR__ . '/maintenance-dashboard.php'; ?>
+<?php require __DIR__ . '/views/maintenance-dashboard.php'; ?>
 <?php elseif ($signedIn && $maintenanceEnabled): ?>
 <main class="maintenance-page">
     <?= logo() ?>
@@ -145,17 +177,20 @@ function logo() {
 </dialog>
 
 <?php elseif ($isCustomer): ?>
-<?php require __DIR__ . '/customer.php'; ?>
+<?php require __DIR__ . '/views/customer.php'; ?>
 <?php else: ?>
 <div id="admin" data-csrf="<?= $authToken ?>" data-role="<?= $account['role'] ?>" data-username="<?= htmlspecialchars($account['username'], ENT_QUOTES, 'UTF-8') ?>" data-paused-modules="<?= $pausedModules ?>">
     <aside class="sidebar">
         <div class="admin-brand"><span aria-hidden="true">⌂<i>🐾</i></span><div><strong>Rem’s</strong><small>Pet Supplies &amp;<br>Accessories Shop</small></div></div>
         <nav aria-label="<?= $isAdmin ? 'Admin' : 'Staff' ?> navigation">
         <?php foreach ($navigation as $i => $item): [$symbol, $name] = explode(' ', $item, 2);
-            if (!$isAdmin && in_array($name, $adminPages, true)) continue; ?>
-            <button data-section="<?= htmlspecialchars($name) ?>"><span aria-hidden="true"><?= $symbol ?></span><?= htmlspecialchars($name) ?></button>
+            if ($isAdmin && (in_array($name, $staffPages, true) || $name === 'Pets')) continue;
+            if (!$isAdmin && in_array($name, $staffHiddenTabs, true)) continue; ?>
+            <button data-section="<?= htmlspecialchars($name) ?>"><span aria-hidden="true"><?= $symbol ?></span><?= htmlspecialchars($name) ?><?php if ($name === 'Booking'): ?><span id="booking-nav-count" class="request-nav-count" hidden></span><?php endif; ?></button>
         <?php endforeach; ?>
-            <button type="button" data-section="Requests"><span aria-hidden="true">⇄</span><?= $isAdmin ? 'Approvals' : 'My Requests' ?><span id="request-nav-count" class="request-nav-count" hidden></span></button>
+            <?php if ($isAdmin): ?>
+            <button type="button" data-section="Requests"><span aria-hidden="true">⇄</span>Approvals<span id="request-nav-count" class="request-nav-count" hidden></span></button>
+            <?php endif; ?>
         </nav>
         <form class="logout-form" method="post">
             <input type="hidden" name="csrf" value="<?= $authToken ?>">
@@ -169,8 +204,8 @@ function logo() {
         <header class="admin-header">
             <span class="admin-header-title"><?= $dashboardTitle ?></span>
             <details class="profile-menu" id="profile-menu">
-                <summary aria-label="System Administrator profile menu">
-                    <span class="profile-name"><?= $isAdmin ? 'System Administrator' : htmlspecialchars($account['username'], ENT_QUOTES, 'UTF-8') ?></span>
+                <summary aria-label="<?= $profileLabel ?> profile menu">
+                    <span class="profile-name"><?= $profileLabel ?></span>
                     <span class="avatar" aria-hidden="true">👨</span>
                 </summary>
                 <div class="profile-panel">
@@ -198,12 +233,22 @@ function logo() {
             </section>
             <section class="dashboard-sales" aria-labelledby="dashboard-sales-title">
                 <h2 id="dashboard-sales-title">Sales overview</h2>
-                <div class="sales-periods">
-                    <?php foreach (['today' => 'Daily Sales', 'week' => 'Weekly Sales', 'month' => 'Monthly Sales'] as $period => $label): ?>
-                        <button type="button" class="sales-period" data-section="Reports" data-sales-period="<?= $period ?>">
-                            <span><?= $label ?></span><strong></strong><small></small>
-                        </button>
-                    <?php endforeach; ?>
+                <div class="sales-summary">
+                    <div class="sales-period-picker">
+                        <span class="sales-period-icon" aria-hidden="true"><i></i><i></i><i></i></span>
+                        <select id="dashboard-sales-period" aria-label="Sales period">
+                            <option value="today">Daily Sales</option>
+                            <option value="week">Weekly Sales</option>
+                            <option value="month" selected>Monthly Sales</option>
+                            <option value="year">Yearly Sales</option>
+                        </select>
+                    </div>
+                    <?php salesPicker('dashboard-sales-product'); ?>
+                    <div id="dashboard-sales-total" aria-live="polite">
+                        <strong></strong><small></small>
+                        <small id="dashboard-sales-product-note" hidden>Includes the full value of matching sales.</small>
+                    </div>
+                    <button type="button" class="filter" id="dashboard-sales-report" data-section="Reports">View Report</button>
                 </div>
             </section>
             <?php else: ?>
@@ -214,6 +259,7 @@ function logo() {
             </div>
             <div class="staff-shortcuts">
                 <button class="primary" type="button" data-section="Point of Sale">Open Point of Sale</button>
+                <button class="filter" type="button" data-section="Inventory">View Products</button>
                 <button class="filter" type="button" data-section="Grooming &amp; Pet Hotel">View Appointments</button>
             </div>
             <?php endif; ?>
@@ -253,7 +299,7 @@ function logo() {
                 </article>
             </div>
             <article class="panel services">
-                <h2><span class="bubble">▣</span> Upcoming Services <button class="link" data-section="Grooming &amp; Pet Hotel">View Schedule ›</button></h2>
+                <h2><span class="bubble">▣</span> Upcoming Services <?php if (!$isAdmin): ?><button class="link" data-section="Grooming &amp; Pet Hotel">View Schedule ›</button><?php endif; ?></h2>
                 <div class="schedule">
                     <div><strong>🐶　 Charlie</strong><span>⌂ &nbsp; Grooming</span><span>Today, Nov 23, 2026</span><span>10:30 AM</span></div>
                     <div><strong>🐕　 Phoebe</strong><span>⌂ &nbsp; Pet Hotel Check-in</span><span>Today, Nov 23, 2026</span><span>1:00 PM</span></div>
@@ -263,11 +309,11 @@ function logo() {
 
         <section id="inventory" hidden>
             <div class="inventory-heading">
-                <div><h1>Inventory</h1><p class="subtitle">Manage your products and stock levels.</p></div>
+                <div><h1>Inventory</h1><p class="subtitle"><?= $isAdmin ? 'Manage products and stock levels.' : 'Review products and stock levels.' ?></p></div>
                 <div class="inventory-actions">
                     <?php if ($isAdmin): ?><button type="button" class="filter" id="download-inventory-pdf" disabled>↓ Download PDF</button><?php endif; ?>
-                    <button type="button" class="primary" id="add-item">＋ Add Item</button>
-                    <button type="button" class="primary" id="add-product">＋ Add Product</button>
+                    <button type="button" class="primary" id="add-item" <?= $isAdmin ? '' : 'hidden' ?>>＋ Add Item</button>
+                    <button type="button" class="primary" id="add-product" <?= $isAdmin ? '' : 'hidden' ?>>＋ Add Product</button>
                 </div>
             </div>
             <p class="retail-message" id="inventory-message" role="status"></p>
@@ -287,31 +333,37 @@ function logo() {
                 <footer><span id="product-count"></span><div class="pagination" id="pagination"></div></footer>
             </div>
         </section>
-        <?php require __DIR__ . '/retail.php'; ?>
-        <?php if ($isAdmin) require __DIR__ . '/admin-history.php'; ?>
+        <?php require __DIR__ . '/views/retail.php'; ?>
+        <?php if ($isAdmin) require __DIR__ . '/views/admin-history.php'; ?>
+        <?php if (!$isAdmin): ?>
+        <section id="reservation-page" hidden aria-labelledby="reservation-title">
+            <div class="operation-heading">
+                <div><h1 id="reservation-title">Reservation</h1><p class="subtitle">Manage product reservations for in-store pickup.</p></div>
+                <button id="refresh-reservations" class="filter" type="button">Refresh</button>
+            </div>
+            <div class="staff-accounts">
+                <p id="reservation-status" class="retail-message" role="status"></p>
+                <div id="customer-order-list"></div>
+            </div>
+        </section>
+        <?php endif; ?>
         <section id="operations" hidden aria-labelledby="operations-title">
             <div class="operation-heading">
                 <div><h1 id="operations-title"></h1><p class="subtitle" id="operations-intro"></p></div>
-                <button class="primary" id="operation-action" type="button"></button>
+                <div class="operation-heading-actions">
+                    <button class="primary" id="operation-action" type="button"></button>
+                    <button class="primary" id="export-sales-pdf" type="button" hidden>Export PDF</button>
+                </div>
             </div>
             <?php if ($isAdmin): ?>
-            <section id="staff-accounts" class="staff-accounts" hidden aria-labelledby="staff-accounts-title">
-                <div class="staff-accounts-heading">
-                    <div><h2 id="staff-accounts-title">Staff Login Accounts</h2><p>Create or disable credentials for the Staff Dashboard.</p></div>
-                    <button id="open-staff-account" type="button" class="primary">＋ Create Staff Account</button>
-                </div>
-                <p id="staff-account-message" role="status"></p>
-                <div id="staff-account-list"></div>
-            </section>
+            <?php require __DIR__ . '/views/staff-accounts.php'; ?>
             <section id="customer-management" class="staff-accounts" hidden>
                 <div class="staff-accounts-heading">
-                    <div><h2>Customer Accounts</h2><p>Customer portal registrations and pickup orders.</p></div>
+                    <div><h2>Customer Accounts</h2><p>Customer portal registrations.</p></div>
                     <button id="refresh-customer-management" class="filter" type="button">Refresh</button>
                 </div>
                 <p id="customer-management-status" class="retail-message" role="status"></p>
                 <div id="customer-account-list"></div>
-                <h2 class="customer-orders-heading">Pickup Orders</h2>
-                <div id="customer-order-list"></div>
             </section>
             <?php endif; ?>
             <div class="operation-stats" id="operation-stats"></div>
@@ -319,12 +371,14 @@ function logo() {
                 <label class="retail-search"><span aria-hidden="true">&#8981;</span><input id="operation-search" type="search"></label>
                 <label id="operation-filter-label"><span id="operation-filter-name"></span><select id="operation-filter"></select></label>
                 <div id="report-dates" hidden>
-                    <label>Period<select id="report-period"><option value="all">All time</option><option value="today">Today</option><option value="week">This week</option><option value="month">This month</option><option value="custom">Custom dates</option></select></label>
+                    <?php salesPicker('report-product'); ?>
+                    <label>Period<select id="report-period"><option value="all">All time</option><option value="today">Today</option><option value="week">This week</option><option value="month">This month</option><option value="year">This year</option><option value="custom">Custom dates</option></select></label>
                     <label>From<input id="report-from" type="date"></label>
                     <label>To<input id="report-to" type="date"></label>
                 </div>
                 <button class="plain" id="operation-reset" type="button">Clear filters</button>
             </div>
+            <p class="retail-message" id="report-product-note" hidden>Totals include the full value of each sale containing the selected product.</p>
             <p id="operations-message" role="status"></p>
             <section id="report-trend" hidden aria-labelledby="report-trend-title">
                 <div class="sales-chart-header">
@@ -333,6 +387,7 @@ function logo() {
                         <button type="button" data-sales-group="day" aria-pressed="true">Daily</button>
                         <button type="button" data-sales-group="week" aria-pressed="false">Weekly</button>
                         <button type="button" data-sales-group="month" aria-pressed="false">Monthly</button>
+                        <button type="button" data-sales-group="year" aria-pressed="false">Yearly</button>
                     </div>
                 </div>
                 <div id="sales-chart" class="sales-chart"></div>
@@ -394,19 +449,7 @@ function logo() {
     <h1>Sales Receipt</h1>
     <pre id="sale-receipt-print-details"></pre>
 </section>
-<dialog id="staff-account-dialog" aria-labelledby="staff-account-title">
-    <button type="button" class="close" aria-label="Close">&times;</button>
-    <h2 id="staff-account-title">Create Staff Account</h2>
-    <form id="staff-account-form" method="post">
-        <input type="hidden" name="csrf" value="<?= $authToken ?>">
-        <input type="hidden" name="action" value="create_staff">
-        <label>Username<input name="username" autocomplete="off" minlength="3" maxlength="32" pattern="[A-Za-z0-9._\-]+" required></label>
-        <label>Password<input name="password" type="password" autocomplete="new-password" minlength="12" maxlength="72" required></label>
-        <label>Confirm password<input name="confirmation" type="password" autocomplete="new-password" minlength="12" maxlength="72" required></label>
-        <p id="staff-account-error" role="alert"></p>
-        <button type="submit" class="primary">Create Staff Account</button>
-    </form>
-</dialog>
+<?php require __DIR__ . '/views/staff-account-dialog.php'; ?>
 <?php endif; ?>
 
 <dialog id="operation-dialog" aria-labelledby="operation-dialog-title">
@@ -418,6 +461,7 @@ function logo() {
         <div class="operation-dialog-actions">
             <button class="primary" id="save-operation">Save</button>
             <button class="plain" id="remove-operation" type="button">Remove</button>
+            <button class="primary" id="appointment-attendance" type="button" hidden>Check in</button>
         </div>
     </form>
 </dialog>
@@ -459,7 +503,7 @@ function logo() {
         <label>Barcode<input name="itemBarcode" readonly></label>
         <canvas id="inventory-item-barcode" width="238" height="64" aria-hidden="true" hidden></canvas>
         <p id="inventory-item-error" class="retail-message" role="alert"></p>
-        <button type="submit" class="primary" id="save-inventory-item"><?= $isAdmin ? 'Save Item' : 'Send for Approval' ?></button>
+        <button type="submit" class="primary" id="save-inventory-item">Save Item</button>
     </form>
 </dialog>
 <script type="application/json" id="initial-products"><?= json_encode($products, JSON_HEX_TAG | JSON_UNESCAPED_UNICODE) ?></script>

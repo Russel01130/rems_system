@@ -16,16 +16,25 @@ function staffActionData(action) {
     return new URLSearchParams({ action, csrf: staffAccountForm.elements.csrf.value });
 }
 
+function staffAccountElement(tag, className, text = '') {
+    const node = document.createElement(tag);
+    node.className = className;
+    node.textContent = text;
+    return node;
+}
+
 function renderStaffAccounts(accounts) {
     staffAccountListDisplay.replaceChildren();
     if (!accounts.length) {
-        staffAccountListDisplay.append(retailNode('p', 'staff-account-empty', 'No staff login accounts yet.'));
+        staffAccountListDisplay.append(staffAccountElement('p', 'staff-account-empty', 'No staff login accounts yet.'));
     }
     for (const account of accounts) {
-        const row = retailNode('div', 'staff-account-row');
-        const name = retailNode('strong', '', account.username);
-        const status = retailNode('span', 'operation-badge ' + (account.active ? 'active' : 'inactive'), account.active ? 'Active' : 'Disabled');
-        const button = retailButton(account.active ? 'Disable' : 'Enable', async () => {
+        const row = staffAccountElement('div', 'staff-account-row');
+        const name = staffAccountElement('strong', '', account.username);
+        const status = staffAccountElement('span', 'operation-badge ' + (account.active ? 'active' : 'inactive'), account.active ? 'Active' : 'Disabled');
+        const button = staffAccountElement('button', 'filter', account.active ? 'Disable' : 'Enable');
+        button.type = 'button';
+        button.addEventListener('click', async () => {
             button.disabled = true;
             staffAccountMessage.textContent = '';
             const data = staffActionData('set_staff_status');
@@ -39,7 +48,7 @@ function renderStaffAccounts(accounts) {
                 staffAccountMessage.textContent = error.message;
                 button.disabled = false;
             }
-        }, 'filter');
+        });
         button.setAttribute('aria-label', button.textContent + ' ' + account.username);
         row.append(name, status, button);
         staffAccountListDisplay.append(row);
@@ -72,9 +81,8 @@ staffAccountForm.addEventListener('submit', async event => {
 });
 
 let staffListLoaded = false;
-document.addEventListener('rems:section', async event => {
-    staffAccountsPanel.hidden = event.detail !== 'User Management';
-    if (staffAccountsPanel.hidden || staffListLoaded) return;
+async function loadStaffAccounts() {
+    if (staffListLoaded) return;
     staffAccountMessage.textContent = 'Loading staff accounts…';
     try {
         const result = await staffAccountRequest(staffActionData('list_staff'));
@@ -84,4 +92,14 @@ document.addEventListener('rems:section', async event => {
     } catch (error) {
         staffAccountMessage.textContent = error.message;
     }
-});
+}
+
+if (document.querySelector('#admin').dataset.role === 'super_admin') {
+    staffAccountDialog.querySelector('.close').addEventListener('click', () => staffAccountDialog.close());
+    loadStaffAccounts();
+} else {
+    document.addEventListener('rems:section', event => {
+        staffAccountsPanel.hidden = event.detail !== 'User Management';
+        if (!staffAccountsPanel.hidden) loadStaffAccounts();
+    });
+}

@@ -6,7 +6,7 @@ if (PHP_SAPI !== 'cli') {
     exit;
 }
 
-require_once __DIR__ . '/admin-auth.php';
+require_once __DIR__ . '/includes/admin-auth.php';
 
 $username = $argv[1] ?? 'superadmin';
 if (!preg_match('/\A[A-Za-z0-9._-]{3,32}\z/', $username)) {

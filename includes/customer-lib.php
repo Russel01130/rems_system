@@ -4,6 +4,7 @@ declare(strict_types=1);
 const CUSTOMER_SLOTS = ['09:00', '10:00', '11:00', '13:00', '14:00'];
 const DAILY_BOOKING_LIMIT = 5;
 const APPOINTMENTS = 'Grooming & Pet Hotel';
+const CUSTOMER_PET_SPECIES = ['Dog', 'Cat', 'Bird', 'Rabbit'];
 
 function manilaNow(): DateTimeImmutable
 {
@@ -14,7 +15,7 @@ function bookingCounts(array $appointments): array
 {
     $days = [];
     foreach ($appointments as $row) {
-        if (!isset($row[2], $row[3]) || ($row[4] ?? '') === 'Cancelled') continue;
+        if (!isset($row[2], $row[3]) || in_array($row[4] ?? '', ['Cancelled', 'Rejected', 'Request expired', 'Cancelled - No-show'], true)) continue;
         $date = $row[2];
         $time = $row[3];
         $days[$date]['total'] = ($days[$date]['total'] ?? 0) + 1;
@@ -25,6 +26,15 @@ function bookingCounts(array $appointments): array
 
 function checkAppointmentChanges(array $old, array $new): void
 {
+    $managed = static function (array $rows): array {
+        $result = [];
+        foreach ($rows as $row) {
+            if (!empty($row[7])) $result[$row[6]] = array_slice($row, 1);
+        }
+        ksort($result);
+        return $result;
+    };
+    if ($managed($old) !== $managed($new)) authResponse(409, 'Use the appointment actions to update online bookings.');
     $before = bookingCounts($old);
     foreach (bookingCounts($new) as $date => $day) {
         if ($day['total'] > max(DAILY_BOOKING_LIMIT, $before[$date]['total'] ?? 0)) {
@@ -67,12 +77,18 @@ function customerProductLabel(array $product): string
     return $unit === '' ? $product[0] : $product[0] . ' · ' . $unit;
 }
 
-function customerPortal(array $data, string $username): array
+function customerPetRegistered(array $pet): bool
+{
+    return ($pet[3] ?? '') !== '' && ($pet[5] ?? '') !== '' && ($pet[6] ?? '') !== '';
+}
+
+function customerPortal(array $data, string $username, bool $includePetPhotos = false): array
 {
     $shop = $data['shop'];
     $now = manilaNow();
     $base = $now->setTime(0, 0);
     $appointments = $shop['records'][APPOINTMENTS] ?? [];
+    $bookings = array_values(array_filter($appointments, static fn(array $row): bool => ($row[7] ?? '') === $username));
     $counts = bookingCounts($appointments);
     $days = [];
     for ($i = 0; $i < 60; $i++) {
@@ -96,13 +112,18 @@ function customerPortal(array $data, string $username): array
         'ready' => $shop !== null,
         'pausedModules' => pausedModules(maintenanceSettings($data)),
         'products' => array_map(static fn(array $row): array => [
-            'id' => $row[6], 'name' => customerProductLabel($row), 'category' => $row[1], 'price' => $row[2],
+            'id' => $row[6], 'name' => customerProductLabel($row), 'productName' => $row[0], 'unit' => $row[8]['unit'] ?? '',
+            'category' => $row[1], 'price' => $row[2],
             'stock' => $row[3], 'icon' => $row[4] ?? '🐾', 'photo' => $row[5] ?? '',
         ], $shop['products'] ?? []),
         'days' => $days,
-        'pets' => array_map(static fn(array $row): array => ['name' => $row[0], 'species' => $row[2]],
+        'pets' => array_map(static fn(array $row): array => [
+            'name' => $row[0], 'species' => $row[2], 'breed' => $row[3] ?? '', 'marking' => $row[6] ?? '',
+            'photo' => $includePetPhotos ? ($row[5] ?? '') : '',
+        ],
             array_values(array_filter($shop['records']['Pets'] ?? [], static fn(array $row): bool => $owner !== null && $row[1] === $owner))),
-        'bookings' => array_values(array_filter($appointments, static fn(array $row): bool => ($row[7] ?? '') === $username)),
+        'bookings' => $bookings,
+        'bookingNotices' => customerBookingNotices($bookings, $now, $data['customerAccounts'][strtolower($username)]['readBookingNotices'] ?? []),
         'orders' => array_values(array_filter($data['customerOrders'], static fn(array $row): bool => $row['username'] === $username)),
     ];
 }
@@ -152,6 +173,46 @@ function handleCustomerSignup(): never
     authResponse(200);
 }
 
+function registerCustomerPet(array &$data, string $username): string
+{
+    $input = shopInput('pet', 460_000);
+    foreach (['name', 'breed', 'marking'] as $field) {
+        $value = $input[$field] ?? '';
+        if (!is_string($value) || !preg_match('/\A.{1,100}\z/us', trim($value))) {
+            authResponse(422, 'Enter a pet name, breed, and marking of up to 100 characters each.');
+        }
+        $input[$field] = trim($value);
+    }
+    if (!in_array($input['species'] ?? '', CUSTOMER_PET_SPECIES, true)) {
+        authResponse(422, 'Choose a valid species.');
+    }
+    $photo = $input['photo'] ?? '';
+    if (!is_string($photo) || strlen($photo) > 450_000 ||
+        !preg_match('/\Adata:(image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+\/]+=*)\z/', $photo, $parts)) {
+        authResponse(422, 'Choose a valid picture of your pet.');
+    }
+    $bytes = base64_decode($parts[2], true);
+    $image = $bytes === false || $bytes === '' ? false : @getimagesizefromstring($bytes);
+    if ($image === false || $image['mime'] !== $parts[1] || max($image[0], $image[1]) > 480) {
+        authResponse(422, 'Choose a valid picture of your pet.');
+    }
+    $owner = customerIdentity($data, $username)[0];
+    $pets = &$data['shop']['records']['Pets'];
+    foreach ($pets as $index => $pet) {
+        if (strcasecmp($pet[0], $input['name']) !== 0) continue;
+        if ($pet[1] !== $owner) authResponse(409, 'That pet name is already in use. Try adding your surname.');
+        if (customerPetRegistered($pet)) {
+            authResponse(409, 'This pet is already registered.');
+        }
+        $pets[$index] = [$pet[0], $owner, $input['species'], $input['breed'], $pet[4] ?? '', $photo, $input['marking']];
+        $data['revision']++;
+        return 'Pet registration completed.';
+    }
+    $pets[] = [$input['name'], $owner, $input['species'], $input['breed'], '', $photo, $input['marking']];
+    $data['revision']++;
+    return 'Pet registered.';
+}
+
 function bookCustomerAppointment(array &$data, string $username): string
 {
     $input = shopInput('booking', 3000);
@@ -159,11 +220,9 @@ function bookCustomerAppointment(array &$data, string $username): string
     $time = $input['time'] ?? '';
     $service = $input['service'] ?? '';
     $pet = $input['pet'] ?? '';
-    $species = $input['species'] ?? '';
     if (!is_string($date) || !preg_match('/\A\d{4}-\d{2}-\d{2}\z/', $date) ||
         !in_array($time, CUSTOMER_SLOTS, true) || !in_array($service, ['Grooming', 'Pet Hotel Check-in'], true) ||
-        !is_string($pet) || trim($pet) === '' || strlen($pet) > 100 ||
-        !in_array($species, ['Dog', 'Cat', 'Bird', 'Rabbit', 'Other'], true)) {
+        !is_string($pet) || !preg_match('/\A.{1,100}\z/us', trim($pet))) {
         authResponse(422, 'Choose a valid date, time, service and pet.');
     }
     $now = manilaNow();
@@ -178,20 +237,18 @@ function bookCustomerAppointment(array &$data, string $username): string
         authResponse(409, 'That date or time is full. Pick another available slot.');
     }
     $owner = customerIdentity($data, $username)[0];
-    $pet = trim($pet);
-    $exists = false;
+    $petName = trim($pet);
+    $registeredPet = null;
     foreach ($data['shop']['records']['Pets'] as $row) {
-        if (strcasecmp($row[0], $pet) !== 0) continue;
-        if ($row[1] !== $owner) authResponse(409, 'Use a distinct pet name, such as the pet name plus your surname.');
-        $pet = $row[0];
-        $exists = true;
+        if ($row[1] !== $owner || strcasecmp($row[0], $petName) !== 0) continue;
+        $registeredPet = $row[0];
         break;
     }
-    if (!$exists) $data['shop']['records']['Pets'][] = [$pet, $owner, $species, '', '', ''];
+    if ($registeredPet === null) authResponse(422, 'Choose a pet from your account in Pet Management.');
     $id = 'BK-' . strtoupper(bin2hex(random_bytes(5)));
-    $appointments[] = [$pet, $service, $date, $time, 'Scheduled', '', $id, $username];
+    $appointments[] = [$registeredPet, $service, $date, $time, 'Pending', '', $id, $username];
     $data['revision']++;
-    return 'Appointment confirmed. Reference ' . $id . '.';
+    return 'Appointment request sent for approval. Reference ' . $id . '.';
 }
 
 function placeCustomerOrder(array &$data, string $username): string
@@ -238,34 +295,62 @@ function handleCustomerPortal(string $action): never
 {
     $account = currentAccount();
     if (!$account) authResponse(403, 'Sign in to continue.');
-    $admin = $account['role'] === 'admin';
-    $adminAction = in_array($action, ['customer_admin_list', 'customer_order_status'], true);
-    if (($adminAction && !$admin) || (!$adminAction && $account['role'] !== 'customer')) {
+    $requiredRole = match ($action) {
+        'customer_admin_list' => 'admin',
+        'customer_booking_status', 'customer_order_list', 'customer_order_status' => 'staff',
+        default => 'customer',
+    };
+    if ($account['role'] !== $requiredRole) {
         authResponse(403, 'This action is unavailable for your account.');
     }
-    $write = in_array($action, ['customer_book', 'customer_order', 'customer_order_status'], true);
-    $result = withShopData($write, static function (array &$data) use ($action, $account, $admin, $write): array {
-        if ($action === 'customer_book') requireModuleOnline($data, 'booking');
+    refreshBookingDeadlines();
+    $write = in_array($action, ['customer_register_pet', 'customer_book', 'customer_order', 'customer_order_status', 'customer_booking_status', 'customer_read_notifications'], true);
+    $result = withShopData($write, static function (array &$data) use ($action, $account, $write): array {
+        if (in_array($action, ['customer_book', 'customer_booking_status'], true)) requireModuleOnline($data, 'booking');
         if (in_array($action, ['customer_order', 'customer_order_status'], true)) requireModuleOnline($data, 'pickup');
-        if ($write && $data['shop'] === null) authResponse(409, 'The shop is getting ready. Try again later.');
+        if ($write && $data['shop'] === null && $action !== 'customer_read_notifications') authResponse(409, 'The shop is getting ready. Try again later.');
         $previousRevision = $data['revision'];
         $message = '';
+        if ($action === 'customer_register_pet') $message = registerCustomerPet($data, $account['username']);
         if ($action === 'customer_book') $message = bookCustomerAppointment($data, $account['username']);
         if ($action === 'customer_order') $message = placeCustomerOrder($data, $account['username']);
         if ($action === 'customer_order_status') $message = resolveCustomerOrder($data);
+        if ($action === 'customer_booking_status') $message = resolveCustomerBooking($data);
+        if ($action === 'customer_read_notifications') {
+            $ids = shopInput('notifications', 1_000_000);
+            $submitted = array_flip(array_filter($ids, 'is_string'));
+            $username = $account['username'];
+            $bookings = array_values(array_filter($data['shop']['records'][APPOINTMENTS] ?? [],
+                static fn(array $row): bool => ($row[7] ?? '') === $username));
+            foreach (customerBookingNotices($bookings, manilaNow()) as $notice) {
+                if (isset($submitted[$notice['id']])) {
+                    $data['customerAccounts'][strtolower($username)]['readBookingNotices'][$notice['id']] = true;
+                }
+            }
+            return ['notice' => 'Notifications marked as read.'];
+        }
         if ($data['revision'] !== $previousRevision) {
             if ($action === 'customer_order_status' && $_POST['status'] === 'Completed') {
                 $data['transactionDetails'][$_POST['id']] = ['processedBy' => $account['username'], 'timestamp' => gmdate('c')];
             }
-            $area = $action === 'customer_book' ? 'Booking' : 'Pickup Orders';
-            $activity = $action === 'customer_order_status' ? $message . ' ' . $_POST['id'] : $message;
+            $area = match ($action) {
+                'customer_register_pet' => 'Pets',
+                'customer_book', 'customer_booking_status' => 'Booking',
+                default => 'Pickup Orders',
+            };
+            $activity = in_array($action, ['customer_order_status', 'customer_booking_status'], true) ? $message . ' ' . $_POST['id'] : $message;
             recordShopAudit($data, $account, $area, $activity);
         }
-        if (!$admin) return ['notice' => $message, 'portal' => customerPortal($data, $account['username'])];
+        if ($account['role'] === 'customer') {
+            $includePetPhotos = $action === 'customer_register_pet' || ($_POST['includePetPhotos'] ?? '') === 'true';
+            return ['notice' => $message, 'portal' => customerPortal($data, $account['username'], $includePetPhotos)];
+        }
+        if ($action === 'customer_booking_status') return ['notice' => $message] + shopResult($data, false, $account['username']);
+        if ($account['role'] === 'staff') return ['notice' => $message, 'orders' => array_reverse($data['customerOrders'])];
         $accounts = array_map(static fn(array $row): array => [
             'username' => $row['username'], 'name' => $row['name'], 'email' => $row['email'], 'created' => $row['created'],
         ], array_values($data['customerAccounts']));
-        return ['notice' => $message, 'accounts' => $accounts, 'orders' => array_reverse($data['customerOrders'])];
+        return ['notice' => $message, 'accounts' => $accounts];
     });
     authResponse(200, '', $result);
 }

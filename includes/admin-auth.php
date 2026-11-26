@@ -4,10 +4,11 @@ declare(strict_types=1);
 require_once __DIR__ . '/staff-auth.php';
 require_once __DIR__ . '/shop-data-lib.php';
 require_once __DIR__ . '/customer-lib.php';
+require_once __DIR__ . '/booking-workflow.php';
 require_once __DIR__ . '/database.php';
 require_once __DIR__ . '/super-admin.php';
 
-const ADMIN_FILE = __DIR__ . '/admin.credentials.php';
+const ADMIN_FILE = __DIR__ . '/../admin.credentials.php';
 const ADMIN_FILE_HEADER = "<?php http_response_code(404); exit; __halt_compiler();\n";
 
 function readAdmin($file): ?array
@@ -172,17 +173,18 @@ function handleAdminRequest(): void
     }
     try {
         if ($action === 'set_maintenance') handleMaintenanceChange();
-        if (isset($_SESSION['super_admin'])) {
+        $staffAction = in_array($action, ['list_staff', 'create_staff', 'set_staff_status'], true);
+        if (isset($_SESSION['super_admin']) && !$staffAction) {
             authResponse(403, 'Use the Super Admin maintenance dashboard.');
         }
-        if ($action !== 'login' && maintenanceStatus()['system']['enabled']) {
+        if ($action !== 'login' && !isset($_SESSION['super_admin']) && maintenanceStatus()['system']['enabled']) {
             authResponse(503, MAINTENANCE_NOTICE);
         }
     } catch (RuntimeException | JsonException $error) {
         error_log('REMS maintenance: ' . $error->getMessage());
         authResponse(503, 'System maintenance controls are temporarily unavailable.');
     }
-    if (in_array($action, ['customer_signup', 'customer_read', 'customer_book', 'customer_order', 'customer_admin_list', 'customer_order_status'], true)) {
+    if (in_array($action, ['customer_signup', 'customer_read', 'customer_register_pet', 'customer_book', 'customer_order', 'customer_admin_list', 'customer_order_list', 'customer_order_status', 'customer_booking_status', 'customer_read_notifications'], true)) {
         try {
             if ($action === 'customer_signup') handleCustomerSignup();
             handleCustomerPortal($action);
@@ -199,7 +201,7 @@ function handleAdminRequest(): void
             authResponse(500, 'Shop records are temporarily unavailable.');
         }
     }
-    if (in_array($action, ['list_staff', 'create_staff', 'set_staff_status'], true)) {
+    if ($staffAction) {
         try {
             handleStaffAccountRequest($action);
         } catch (RuntimeException | JsonException | ValueError $error) {

@@ -14,3 +14,7 @@
 4. Open `http://127.0.0.1:8080/` for the PowerShell preview. On first access to each data group, the app copies the existing PHP-file records into the corresponding `admin`, `staff`, or `shop` row. The `shop` row also contains customer accounts, orders, and appointments. You can check these rows under `rems_system → rems_state` in your database manager.
 
 When `REMS_DB_DSN` is unset, the app uses its original PHP files. Once MySQL is enabled, keep it enabled for all app instances so that all shared changes go to the same database. The original files remain as they were at import time. The retail interface keeps browser-local drafts and saved sales in that browser.
+
+## Appointment deadlines
+
+The app checks appointment deadlines during customer and shop requests. To persist no-show cancellations and expire unanswered requests while nobody is using the app, run `php database/process-booking-deadlines.php` once a minute from Windows Task Scheduler. Use the same database environment and PHP executable as the web app.

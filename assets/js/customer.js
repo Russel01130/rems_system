@@ -8,8 +8,12 @@ const priceCents = amount => Math.round(Number(amount) * 100);
 const formatMoney = amount => currency.format(amount);
 const portalDateObject = value => new Date(value + 'T00:00:00Z');
 const bookingForm = getPortal('#portal-booking-form');
+const petForm = getPortal('#portal-pet-form');
+const notificationInbox = getPortal('#portal-notifications');
+const markNotificationsRead = getPortal('#portal-notification-read');
 const receiptDialog = getPortal('#portal-receipt');
 const cart = new Map();
+const shopVariantSelections = new Map();
 let data = { products: [], days: [], orders: [], bookings: [], pets: [], ready: false,
     pausedModules: JSON.parse(portal.dataset.pausedModules) };
 let date = '';
@@ -19,6 +23,9 @@ let checkoutId = '';
 let loading = false;
 let saving = false;
 let activePage = 'shop';
+let displayedBookingPet;
+let markingNotifications = false;
+let renderedNotificationList;
 
 function element(tag, className = '', text) {
     const node = document.createElement(tag);
@@ -85,19 +92,20 @@ function adjustCart(id, delta) {
 function renderShop() {
     const query = getPortal('#portal-search').value.toLowerCase().trim();
     const list = getPortal('#portal-products');
-    const matches = data.products.filter(item => (item.name + ' ' + item.category).toLowerCase().includes(query));
+    const variants = data.products.map(item => ({ ...item, name: item.productName ?? item.name, label: item.name }));
+    const matches = groupCatalogVariants(variants,
+        variant => (variant.label + ' ' + variant.category).toLowerCase().includes(query), shopVariantSelections);
     list.replaceChildren();
     if (!matches.length) list.append(element('p', 'operation-empty', data.ready ? 'No matching products.' : 'The catalog is getting ready.'));
-    for (const product of matches) {
-        const card = element('article', 'catalog-item');
-        const info = element('div', 'catalog-info');
-        const add = portalButton('+', () => adjustCart(product.id, 1), 'add-to-cart');
-        add.setAttribute('aria-label', 'Add ' + product.name + ' to cart');
-        add.disabled = saving || product.stock <= (cart.get(product.id) ?? 0);
-        info.append(element('h2', '', product.name), element('strong', '', formatMoney(product.price)),
-            element('span', product.stock ? 'stock-ready' : 'stock-warning', product.stock ? product.stock + ' in stock' : 'Out of stock'), add);
-        card.append(productImage(product), info);
-        list.append(card);
+    for (const group of matches) {
+        list.append(catalogVariantCard(group, {
+            selections: shopVariantSelections,
+            formatPrice: formatMoney,
+            picture: productImage,
+            stockText: stock => stock ? stock + ' in stock' : 'Out of stock',
+            canAdd: variant => !saving && variant.stock > (cart.get(variant.id) ?? 0),
+            addVariant: id => adjustCart(id, 1)
+        }));
     }
     const lines = getPortal('#portal-cart-lines');
     lines.replaceChildren();
@@ -176,13 +184,19 @@ function renderSlots() {
         const button = portalButton(slot.time, () => {
             time = slot.time;
             for (const option of area.children) option.setAttribute('aria-pressed', option === button ? 'true' : 'false');
-            getPortal('#portal-book').disabled = saving || !data.ready;
+            updateBookingSubmit();
         });
         button.disabled = !slot.available || saving;
         button.setAttribute('aria-pressed', time === slot.time ? 'true' : 'false');
         area.append(button);
     }
-    getPortal('#portal-book').disabled = saving || !data.ready || !selected?.slots.some(slot => slot.time === time && slot.available);
+    updateBookingSubmit();
+}
+
+function updateBookingSubmit() {
+    const selected = data.days.find(day => day.date === date);
+    getPortal('#portal-book').disabled = saving || !data.ready || !bookingForm.elements.pet.value ||
+        !selected?.slots.some(slot => slot.time === time && slot.available);
 }
 
 function viewOrderReceipt(order) {
@@ -240,6 +254,52 @@ function renderHistory() {
     if (!appointments.children.length) appointments.append(element('p', 'portal-help', 'No appointments yet.'));
 }
 
+function registeredPetCard(pet) {
+    const card = element('article', 'portal-registered-pet');
+    if (/^data:image\/(?:jpeg|png|webp);base64,[A-Za-z0-9+/]+=*$/.test(pet.photo)) {
+        const picture = element('img');
+        picture.src = pet.photo;
+        picture.alt = 'Photo of ' + pet.name;
+        card.append(picture);
+    }
+    const details = element('div');
+    details.append(element('strong', '', pet.name));
+    for (const [label, value] of [['Species', pet.species], ['Breed', pet.breed], ['Marking', pet.marking]]) {
+        if (value) details.append(element('p', '', label + ': ' + value));
+    }
+    card.append(details);
+    return card;
+}
+
+function renderRegisteredPets() {
+    const list = getPortal('#portal-registered-pets');
+    list.replaceChildren(...data.pets.map(registeredPetCard));
+    if (!data.pets.length) list.append(element('p', 'portal-help', 'No pets registered yet.'));
+}
+
+function renderBookingPetDetails() {
+    const pet = data.pets.find(item => item.name === bookingForm.elements.pet.value);
+    const details = getPortal('#booking-pet-details');
+    details.hidden = !pet;
+    if (pet === displayedBookingPet || (pet && displayedBookingPet &&
+        ['name', 'species', 'breed', 'marking', 'photo'].every(key => pet[key] === displayedBookingPet[key]))) return;
+    displayedBookingPet = pet;
+    details.replaceChildren(...(pet ? [registeredPetCard(pet)] : []));
+}
+
+function renderBookingPets() {
+    const select = bookingForm.elements.pet;
+    const names = data.pets.map(pet => pet.name);
+    const selected = select.value;
+    if (select.options.length !== names.length + 1 || names.some((name, index) => select.options[index + 1].value !== name)) {
+        select.replaceChildren(new Option('Choose your pet', ''), ...names.map(name => new Option(name, name)));
+        select.value = names.includes(selected) ? selected : '';
+    }
+    select.disabled = !names.length;
+    getPortal('#booking-pet-help').hidden = Boolean(names.length);
+    renderBookingPetDetails();
+}
+
 function acceptPortal(portalData) {
     data = portalData;
     const firstMonth = data.days[0]?.date.slice(0, 7) ?? '';
@@ -250,31 +310,92 @@ function acceptPortal(portalData) {
     if (!date || !day.slots.some(slot => slot.time === time && slot.available)) time = '';
 }
 
+function renderNotifications() {
+    const notices = data.bookingNotices ?? [];
+    const unread = notices.filter(item => !item.read).length;
+    const badge = getPortal('#portal-notification-count');
+    badge.hidden = !unread;
+    badge.textContent = unread > 99 ? '99+' : String(unread);
+    notificationInbox.querySelector('summary').setAttribute('aria-label', unread
+        ? 'Appointment notifications, ' + unread + ' unread' : 'Appointment notifications');
+    markNotificationsRead.disabled = !unread || markingNotifications;
+    const fingerprint = JSON.stringify(notices);
+    if (fingerprint === renderedNotificationList) return;
+    renderedNotificationList = fingerprint;
+    const list = getPortal('#portal-booking-notice-list');
+    list.replaceChildren(...notices.map(item => {
+        const row = element('li', item.read ? '' : 'notification-unread');
+        row.append(element('p', '', item.message));
+        if (item.sentAt) {
+            const timestamp = element('time', '', notificationTime.format(new Date(item.sentAt)));
+            timestamp.dateTime = item.sentAt;
+            row.append(timestamp);
+        }
+        return row;
+    }));
+    if (!notices.length) list.append(element('li', 'portal-help', 'No notifications yet.'));
+}
+
 function renderPortal() {
+    renderNotifications();
     const bookingPaused = data.pausedModules.includes('booking');
     getPortal('#portal-shop').hidden = activePage !== 'shop';
+    getPortal('#portal-pet-management').hidden = activePage !== 'pets';
     getPortal('#portal-history').hidden = activePage !== 'history';
     getPortal('#portal-booking').hidden = activePage !== 'booking' || bookingPaused;
     getPortal('#portal-booking-maintenance').hidden = activePage !== 'booking' || !bookingPaused;
     if (activePage === 'shop') renderShop();
     if (activePage === 'booking' && !bookingPaused) {
-        getPortal('#portal-pets').replaceChildren(...data.pets.map(pet => new Option(pet.name, pet.name)));
+        renderBookingPets();
         renderCalendar();
         renderSlots();
     }
     if (activePage === 'history') renderHistory();
+    if (activePage === 'pets') renderRegisteredPets();
 }
 
 async function refreshPortal() {
-    if (loading || saving) return;
+    if (loading || saving || markingNotifications) return;
     loading = true;
     try {
-        acceptPortal((await request('customer_read')).portal);
+        acceptPortal((await request('customer_read', { includePetPhotos: activePage === 'pets' || activePage === 'booking' })).portal);
         renderPortal();
     } catch (error) {
         notice(error.message, true);
     } finally { loading = false; }
 }
+
+const notificationTime = new Intl.DateTimeFormat('en-PH', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Manila' });
+markNotificationsRead.addEventListener('click', async () => {
+    if (markingNotifications) return;
+    const ids = new Set((data.bookingNotices ?? []).filter(item => !item.read).map(item => item.id));
+    if (!ids.size) return;
+    markingNotifications = true;
+    const status = getPortal('#portal-notification-status');
+    status.textContent = '';
+    renderNotifications();
+    try {
+        await request('customer_read_notifications', { notifications: [...ids] });
+        for (const item of data.bookingNotices ?? []) {
+            if (ids.has(item.id)) item.read = true;
+        }
+        status.textContent = 'Marked as read.';
+    } catch (error) {
+        status.textContent = error.message;
+    } finally {
+        markingNotifications = false;
+        renderNotifications();
+    }
+});
+document.addEventListener('click', event => {
+    if (notificationInbox.open && !notificationInbox.contains(event.target)) notificationInbox.open = false;
+});
+notificationInbox.addEventListener('keydown', event => {
+    if (event.key !== 'Escape' || !notificationInbox.open) return;
+    event.preventDefault();
+    notificationInbox.open = false;
+    notificationInbox.querySelector('summary').focus();
+});
 
 for (const button of portal.querySelectorAll('[data-portal-page]')) {
     button.addEventListener('click', () => {
@@ -287,16 +408,16 @@ for (const id of ['#portal-refresh', '#refresh-activity']) getPortal(id).addEven
 getPortal('#portal-search').addEventListener('input', renderShop);
 getPortal('#month-back').addEventListener('click', () => { month = monthOffset(-1); renderCalendar(); });
 getPortal('#month-next').addEventListener('click', () => { month = monthOffset(1); renderCalendar(); });
-bookingForm.elements.pet.addEventListener('input', () => {
-    const pet = data.pets.find(item => item.name.toLowerCase() === bookingForm.elements.pet.value.trim().toLowerCase());
-    if (pet && [...bookingForm.elements.species.options].some(option => option.value === pet.species)) bookingForm.elements.species.value = pet.species;
+bookingForm.elements.pet.addEventListener('change', () => {
+    renderBookingPetDetails();
+    updateBookingSubmit();
 });
 
 function freshCheckoutId() {
     return globalThis.crypto?.randomUUID?.() ?? Date.now().toString(36) + '-' + Math.random().toString(36).slice(2);
 }
 
-async function savePortal(action, fields, onSuccess) {
+async function savePortal(action, fields, onSuccess, successPage = 'history') {
     if (saving) return;
     saving = true;
     notice('');
@@ -305,7 +426,7 @@ async function savePortal(action, fields, onSuccess) {
         const result = await request(action, fields);
         acceptPortal(result.portal);
         onSuccess();
-        showPortalPage('history');
+        showPortalPage(successPage);
         notice(result.notice);
     } catch (error) {
         notice(error.message, true);
@@ -327,15 +448,42 @@ getPortal('#portal-order').addEventListener('click', () => {
 
 bookingForm.addEventListener('submit', event => {
     event.preventDefault();
-    if (!date || !time) return;
+    if (!date || !time || !bookingForm.elements.pet.value) return;
     const values = new FormData(bookingForm);
     savePortal('customer_book', { booking: {
-        date, time, service: values.get('service'), pet: values.get('pet'), species: values.get('species')
+        date, time, service: values.get('service'), pet: values.get('pet')
     } }, () => { date = time = ''; bookingForm.reset(); });
+});
+
+petForm.addEventListener('submit', async event => {
+    event.preventDefault();
+    const button = petForm.querySelector('button[type="submit"]');
+    if (button.disabled || saving) return;
+    const values = new FormData(petForm);
+    const [name, breed, marking] = ['name', 'breed', 'marking'].map(field => values.get(field).trim());
+    if (!name || !breed || !marking) {
+        notice('Enter a pet name, breed, and marking.', true);
+        return;
+    }
+    button.disabled = true;
+    notice('');
+    try {
+        const photo = await prepareRecordPhoto(values.get('photo'));
+        await savePortal('customer_register_pet', {
+            pet: { name, species: values.get('species'), breed, marking, photo }
+        }, () => petForm.reset(), 'pets');
+    } catch (error) {
+        notice(error.message || 'Choose a readable picture of your pet.', true);
+    } finally {
+        button.disabled = false;
+    }
 });
 
 renderPortal();
 refreshPortal();
 setInterval(() => {
-    if (!document.hidden && activePage === 'booking') refreshPortal();
+    if (!document.hidden) refreshPortal();
 }, 10000);
+document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) refreshPortal();
+});

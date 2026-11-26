@@ -1,8 +1,8 @@
 <?php
 declare(strict_types=1);
 
-const SHOP_FILE = __DIR__ . '/shop-data.php';
-const SHOP_LOCK = __DIR__ . '/shop-lock.php';
+const SHOP_FILE = __DIR__ . '/../shop-data.php';
+const SHOP_LOCK = __DIR__ . '/../shop-lock.php';
 
 function withShopData(bool $write, callable $operation): array
 {
@@ -35,7 +35,7 @@ function withShopFile(bool $write, callable $operation): array
         $data += ['customerAccounts' => [], 'customerOrders' => []];
         $result = $operation($data);
         if ($write) {
-            $temporary = __DIR__ . '/shop-write-' . bin2hex(random_bytes(12)) . '.php';
+            $temporary = __DIR__ . '/../shop-write-' . bin2hex(random_bytes(12)) . '.php';
             $contents = ADMIN_FILE_HEADER . json_encode($data, JSON_THROW_ON_ERROR);
             try {
                 if (file_put_contents($temporary, $contents) !== strlen($contents) || !rename($temporary, SHOP_FILE)) {
@@ -66,6 +66,7 @@ function shopResult(array $data, bool $admin, string $username): array
         $shop['records']['User Management'] = [];
     }
     return ['revision' => $data['revision'], 'shop' => $shop, 'requests' => $requests,
+        'pendingBookings' => $admin ? 0 : pendingBookingCount($data),
         'transactionDetails' => $admin ? ($data['transactionDetails'] ?? []) : [],
         'saleReceiptIds' => $admin ? array_keys($data['saleReceipts'] ?? []) : [],
         'pausedModules' => pausedModules(maintenanceSettings($data))];
@@ -277,12 +278,14 @@ function handleShopRequest(string $action): never
     if (($action === 'shop_submit' && $admin) || (in_array($action, ['shop_save', 'shop_decide'], true) && !$admin)) {
         authResponse(403, 'This action is reserved for the other account role.');
     }
+    refreshBookingDeadlines();
     $result = withShopData(!in_array($action, ['shop_read', 'shop_status'], true), static function (array &$data) use ($action, $admin, $account): array {
         if ($action === 'shop_status') {
             $requests = visibleShopRequests($data, $admin, $account['username']);
             $pending = array_values(array_filter($requests, static fn(array $request): bool => $request['status'] === 'Pending'));
             return [
                 'revision' => $data['revision'],
+                'pendingBookings' => $admin ? 0 : pendingBookingCount($data),
                 'key' => implode('|', array_map(static fn(array $request): string => $request['id'] . ':' . $request['status'], $requests)),
                 'pending' => count($pending),
                 'latest' => array_map(static fn(array $request): array => [
@@ -294,7 +297,10 @@ function handleShopRequest(string $action): never
         if ($action === 'shop_submit') {
             if ($data['shop'] === null) authResponse(409, 'Ask the admin to open the dashboard first.');
             $type = $_POST['type'] ?? '';
-            $types = ['product_add', 'product_edit', 'pet_add', 'pet_edit', 'pet_remove', 'customer_add', 'customer_edit', 'customer_import', 'sale'];
+            if (in_array($type, ['product_add', 'product_edit'], true)) {
+                authResponse(403, 'Only administrators can add or edit products.');
+            }
+            $types = ['pet_add', 'pet_edit', 'pet_remove', 'customer_add', 'customer_edit', 'customer_import', 'sale'];
             if (!in_array($type, $types, true)) authResponse(422, 'This request type is unavailable.');
             checkRequestMaintenance($data, $type);
             $payload = shopInput('payload', 1_500_000);
@@ -310,6 +316,14 @@ function handleShopRequest(string $action): never
                 authResponse(409, 'Shop records changed. Refresh and try again.');
             }
             $next = shopSnapshot($data);
+            if ($data['shop'] !== null) {
+                $previous = $data['shop'];
+                if ($next['records']['Customers'] !== $previous['records']['Customers'] ||
+                    $next['records']['Pets'] !== $previous['records']['Pets'] ||
+                    $next['records']['Reports'] !== $previous['records']['Reports']) {
+                    authResponse(403, 'Review staff requests in Approvals to update operational records.');
+                }
+            }
             checkShopMaintenance($data, $next);
             checkAppointmentChanges($data['shop']['records'][APPOINTMENTS] ?? [], $next['records'][APPOINTMENTS]);
             auditShopSave($data, $account, $next);

@@ -1,7 +1,7 @@
 <?php
 declare(strict_types=1);
 
-const SUPER_ADMIN_FILE = __DIR__ . '/super-admin.credentials.php';
+const SUPER_ADMIN_FILE = __DIR__ . '/../super-admin.credentials.php';
 const MAINTENANCE_NOTICE = 'The shop is temporarily closed for system maintenance. Please try again later.';
 const MAINTENANCE_MODULES = [
     'system' => ['▦', 'System-wide', 'Pause access for admins, staff, and customers.'],
@@ -96,8 +96,9 @@ function handleMaintenanceChange(): never
         authResponse(422, 'Use up to 240 characters for the maintenance reason.');
     }
     $reason = trim($reason);
+    if ($reason === '') authResponse(422, 'Enter a reason for the maintenance change.');
 
-    withShopData(true, static function (array &$data) use ($mode, $module, $reason): array {
+    $status = withShopData(true, static function (array &$data) use ($mode, $module, $reason): array {
         $enabled = $mode === '1';
         if ($enabled !== maintenanceSettings($data)[$module]['enabled']) {
             $change = ['enabled' => $enabled, 'changedAt' => gmdate('c'), 'changedBy' => $_SESSION['super_admin']];
@@ -111,9 +112,15 @@ function handleMaintenanceChange(): never
                 'Maintenance', ($enabled ? 'Enabled ' : 'Disabled ') . MAINTENANCE_MODULES[$module][1] . ' maintenance.');
             $data['revision']++;
         }
-        return [];
+        return maintenanceSettings($data)[$module];
     });
 
-    header('Location: ./?maintenance=' . $module, true, 303);
+    if (($_SERVER['HTTP_ACCEPT'] ?? '') === 'application/json') {
+        $lastChanged = $status['changedAt']
+            ? (new DateTimeImmutable($status['changedAt']))->setTimezone(new DateTimeZone('Asia/Manila'))->format('M j, Y, g:i A')
+            : null;
+        authResponse(200, '', ['enabled' => $status['enabled'], 'lastChanged' => $lastChanged]);
+    }
+    header('Location: ./?maintenance=overview', true, 303);
     exit;
 }

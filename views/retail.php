@@ -11,7 +11,9 @@ if (empty($signedIn)) {
         <div class="catalog">
             <div class="retail-toolbar">
                 <label class="retail-search">⌕ <input id="pos-search" type="search" aria-label="Search products" placeholder="Search product by name or scan barcode…"></label>
-                <select id="pos-category" aria-label="Product category"></select>
+                <label class="retail-select-picker retail-select-category">
+                    <span>Category</span><select id="pos-category" aria-label="Product category"></select>
+                </label>
                 <div class="view-buttons"><button data-layout="grid" aria-label="Grid view" aria-pressed="true">▦</button><button data-layout="list" aria-label="List view" aria-pressed="false">☷</button></div>
             </div>
             <div id="pos-categories" class="category-tabs" aria-label="Product categories"></div>
@@ -23,8 +25,8 @@ if (empty($signedIn)) {
             <div id="cart-lines"></div>
             <div class="sale-totals">
                 <div><span>Subtotal</span><strong id="sale-subtotal"></strong></div>
-                <div><label>Discount
-                    <select id="sale-discount">
+                <div><label class="retail-select-picker retail-select-discount"><span>Discount</span>
+                    <select id="sale-discount" aria-label="Discount">
                         <option value="">No Discount</option>
                         <option value="senior">Senior Citizen (20%)</option>
                         <option value="pwd">PWD (20%)</option>
@@ -32,9 +34,12 @@ if (empty($signedIn)) {
                 </label><span id="discount-total"></span></div>
                 <div class="grand-total"><strong>Total</strong><strong id="sale-total"></strong></div>
                 <button class="primary checkout" id="checkout">▤ &nbsp; Checkout / Payment</button>
-                <div class="sale-actions"><button type="button" id="hold-sale">Ⅱ &nbsp; Hold Sale</button></div>
+                <div class="sale-actions">
+                    <button type="button" id="hold-sale">Ⅱ &nbsp; Hold Sale for 3 Hours</button>
+                </div>
                 <div id="saved-sales"></div>
                 <p id="sale-message" role="status"></p>
+                <p id="hold-expiry-message" role="status" hidden></p>
             </div>
         </aside>
     </div>
@@ -42,7 +47,7 @@ if (empty($signedIn)) {
 <section id="customers-page" hidden aria-labelledby="customers-title">
     <div class="customer-heading">
         <div><h1 id="customers-title">Customers</h1><p class="subtitle">Manage your customer records and information. 🐾</p></div>
-        <div><button id="import-customers">↥ &nbsp; Import Customers</button><button class="primary" id="add-customer">＋ Add Customer</button></div>
+        <div <?= $isAdmin ? 'hidden' : '' ?>><button id="import-customers">↥ &nbsp; Import Customers</button><button class="primary" id="add-customer">＋ Add Customer</button></div>
     </div>
     <div class="retail-toolbar customer-toolbar">
         <label class="retail-search">⌕ <input id="customer-search" type="search" aria-label="Search customers" placeholder="Search customers by name, email or phone…"></label>
@@ -68,7 +73,6 @@ if (empty($signedIn)) {
         <label>Status<select name="status"><option>Active</option><option>Inactive</option></select></label>
         <p class="retail-message" id="customer-error" role="alert"></p>
         <button type="submit" class="primary" id="save-customer">Save Customer</button>
-        <button type="button" class="filter" id="delete-customer" hidden>Delete Customer</button>
     </form>
 </dialog>
 <dialog id="sale-receipt-dialog" aria-labelledby="sale-receipt-title">
